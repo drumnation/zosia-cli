@@ -41,7 +41,11 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/brain-garden/zosia.git"
+    "url": "https://github.com/drumnation/zosia-cli.git"
+  },
+  "homepage": "https://github.com/drumnation/zosia-cli#readme",
+  "bugs": {
+    "url": "https://github.com/drumnation/zosia-cli/issues"
   },
   "engines": {
     "node": ">=18.0.0"
