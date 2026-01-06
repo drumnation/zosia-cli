@@ -11,13 +11,16 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { config } from 'dotenv';
-import updateNotifier from 'update-notifier';
 import { createRequire } from 'module';
 
-// Check for updates (runs async in background, notifies on next run)
 const require = createRequire(import.meta.url);
 const pkg = require('../package.json');
-updateNotifier({ pkg, updateCheckInterval: 1000 * 60 * 60 }).notify({ isGlobal: true });
+
+// Import updater (GitHub-based, not npm registry)
+import { notifyIfUpdateAvailable, runUpdate, getCurrentVersion } from './updater.js';
+
+// Check for updates in background (non-blocking)
+notifyIfUpdateAvailable().catch(() => {});
 import { resolve } from 'path';
 import readline from 'readline';
 import { chat, getSession, clearSession } from './orchestrator.js';
@@ -218,6 +221,15 @@ program
     child.on('close', (code) => {
       process.exit(code ?? 0);
     });
+  });
+
+// Update command - update from GitHub
+program
+  .command('update')
+  .description('Update Zosia to the latest version from GitHub')
+  .action(async () => {
+    const success = await runUpdate();
+    process.exit(success ? 0 : 1);
   });
 
 // Interactive TUI - Dashboard mode with full visibility
@@ -1282,7 +1294,7 @@ configCommand.action(() => {
 });
 
 // Handle CLI execution
-const knownCommands = ['setup', 'tui', 'i', 'chat', 'status', 'help-topic', 'history', 'clear', 'login', 'logout', 'whoami', 'config'];
+const knownCommands = ['setup', 'update', 'tui', 'i', 'chat', 'status', 'help-topic', 'history', 'clear', 'login', 'logout', 'whoami', 'config'];
 
 // Check for -p/--print flag
 const hasPrintFlag = process.argv.includes('-p') || process.argv.includes('--print');

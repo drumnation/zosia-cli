@@ -104,6 +104,7 @@ zosia -p "What's in this image? @./screenshot.png"
 | `zosia` | Launch interactive TUI |
 | `zosia chat` | Start chat REPL |
 | `zosia setup` | Run setup wizard |
+| `zosia update` | Update to the latest version from GitHub |
 | `zosia status` | Check system health |
 | `zosia config show` | View configuration |
 | `zosia config model <id>` | Set conscious mind model |
@@ -195,11 +196,19 @@ The onboarding status shows:
 
 ## Updating
 
-Zosia will notify you when updates are available. To update:
+Zosia automatically checks for updates when you run it. When a new version is available, you'll see a notification banner.
+
+To update to the latest version:
 
 ```bash
+# Use the built-in update command
+zosia update
+
+# Or install manually
 npm install -g github:drumnation/zosia-cli
 ```
+
+**Note**: Since Zosia is installed directly from GitHub (not npm registry), updates are immediate - as soon as a new version is pushed to the main branch, you can update to get it.
 
 ## Troubleshooting
 
