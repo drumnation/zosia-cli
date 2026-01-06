@@ -124,7 +124,28 @@ zosia -p "What's in this image? @./screenshot.png"
 | `/copy code` | Copy code blocks |
 | `/session save` | Save current session |
 | `/session load` | Load a saved session |
-| `/onboarding` | Check setup status |
+| `/onboarding` | Check setup status (see below) |
+
+### Onboarding Commands
+
+Check your setup status and configure Zosia from within the TUI:
+
+```
+/onboarding              # Show full setup status with progress bar
+/onboarding status       # Same as above
+/onboarding openrouter YOUR_KEY  # Set OpenRouter API key
+/onboarding model        # List available models
+/onboarding model google/gemma-2-9b-it:free  # Set model
+/onboarding memory       # Check Graphiti memory connection
+```
+
+The onboarding status shows:
+- Node.js version
+- OpenRouter API key status
+- Claude Code authentication
+- Memory (Graphiti) connection
+- Model configuration
+- User identity
 
 ## Architecture
 
