@@ -1,0 +1,83 @@
+{
+  "name": "@zosia/cli",
+  "version": "0.1.0",
+  "description": "Zosia AI Companion CLI - Dual consciousness architecture with I-Layer (conscious) and We-Layer (unconscious)",
+  "author": "Dave Mieloch <dave@brain-garden.io>",
+  "license": "MIT",
+  "private": false,
+  "type": "module",
+  "bin": {
+    "zosia": "./bin/zosia.js"
+  },
+  "exports": {
+    ".": "./dist/index.js",
+    "./types": "./dist/types.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "bin",
+    "dist",
+    "cortex",
+    "docs"
+  ],
+  "scripts": {
+    "zosia": "tsx src/cli.ts",
+    "dev": "tsx watch src/cli.ts",
+    "build": "tsc && chmod +x bin/zosia.js",
+    "prepare": "npm run build",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "setup": "tsx src/setup.ts"
+  },
+  "keywords": [
+    "ai",
+    "companion",
+    "claude",
+    "consciousness",
+    "memory",
+    "graphiti",
+    "openrouter"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/brain-garden/zosia.git"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "@inkjs/ui": "^2.0.0",
+    "appwrite": "^16.0.2",
+    "chalk": "^5.3.0",
+    "clipboardy": "^5.0.2",
+    "commander": "^12.0.0",
+    "dotenv": "^16.4.5",
+    "fast-glob": "^3.3.2",
+    "fuse.js": "^7.1.0",
+    "ink": "^6.6.0",
+    "ink-markdown": "^1.0.4",
+    "ink-spinner": "^5.0.0",
+    "ink-text-input": "^6.0.0",
+    "inquirer": "^9.2.0",
+    "react": "^19.2.3",
+    "update-notifier": "^7.3.1"
+  },
+  "devDependencies": {
+    "@types/inquirer": "^9.0.0",
+    "@types/node": "^22.0.0",
+    "@types/react": "^18.3.17",
+    "@types/update-notifier": "^6.0.8",
+    "tsx": "^4.20.3",
+    "typescript": "^5.7.3",
+    "vitest": "^2.0.0"
+  },
+  "peerDependencies": {
+    "claude-code": "*"
+  },
+  "peerDependenciesMeta": {
+    "claude-code": {
+      "optional": true
+    }
+  }
+}
