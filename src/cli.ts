@@ -1271,6 +1271,120 @@ configCommand
     }
   });
 
+// Skills management (Open Agent Skills Standard)
+const skillsCommand = configCommand
+  .command('skills')
+  .alias('mind-skills')  // Backward compatibility
+  .description('List and manage skills (cognitive capabilities following Open Standard)');
+
+// List skills (default action)
+skillsCommand
+  .command('list')
+  .description('List all available skills')
+  .action(async () => {
+    const { listSkills } = await import('./skills/index.js');
+    const skills = await listSkills();
+
+    console.log(chalk.cyan('\n┌─ Skills ───────────────────────────────────────────────┐'));
+    console.log(chalk.cyan('│ ') + chalk.white('Cognitive capabilities for the I/We layers'));
+    console.log(chalk.cyan('│ '));
+
+    for (const skill of skills) {
+      const status = skill.enabled ? chalk.green('✅') : chalk.gray('○ ');
+      const layers = skill.layers.map(l => l === 'i-layer' ? 'I' : 'We').join('+');
+      const override = skill.overridden ? chalk.yellow(' (override)') : '';
+      console.log(chalk.cyan('│ ') + `${status} ${chalk.white(skill.name)} ${chalk.gray(`(${layers})`)}${override}`);
+      console.log(chalk.cyan('│ ') + chalk.gray(`   ${skill.description}`));
+    }
+
+    console.log(chalk.cyan('│ '));
+    console.log(chalk.cyan('└────────────────────────────────────────────────────────┘'));
+    console.log(chalk.gray('\nLayers: I = I-Layer (conscious), We = We-Layer (subconscious)'));
+    console.log(chalk.gray('Commands: zosia config skills enable <id> | disable <id> | reset'));
+  });
+
+// Enable a skill
+skillsCommand
+  .command('enable <skillId>')
+  .description('Enable a skill (override manifest default)')
+  .action(async (skillId: string) => {
+    const { enableSkill } = await import('./config.js');
+    const { clearPromptCache, listSkills } = await import('./skills/index.js');
+
+    // Verify skill exists
+    const skills = await listSkills();
+    const skill = skills.find(s => s.id === skillId);
+    if (!skill) {
+      console.log(chalk.red(`Unknown skill: ${skillId}`));
+      console.log(chalk.gray('Available: ' + skills.map(s => s.id).join(', ')));
+      return;
+    }
+
+    await enableSkill(skillId);
+    clearPromptCache();
+    console.log(chalk.green(`✅ Enabled: ${skill.name}`));
+    console.log(chalk.gray('Prompt cache cleared. Skill active on next chat.'));
+  });
+
+// Disable a skill
+skillsCommand
+  .command('disable <skillId>')
+  .description('Disable a skill (override manifest default)')
+  .action(async (skillId: string) => {
+    const { disableSkill } = await import('./config.js');
+    const { clearPromptCache, listSkills } = await import('./skills/index.js');
+
+    // Verify skill exists
+    const skills = await listSkills();
+    const skill = skills.find(s => s.id === skillId);
+    if (!skill) {
+      console.log(chalk.red(`Unknown skill: ${skillId}`));
+      console.log(chalk.gray('Available: ' + skills.map(s => s.id).join(', ')));
+      return;
+    }
+
+    await disableSkill(skillId);
+    clearPromptCache();
+    console.log(chalk.yellow(`○  Disabled: ${skill.name}`));
+    console.log(chalk.gray('Prompt cache cleared. Skill inactive on next chat.'));
+  });
+
+// Reset to manifest defaults
+skillsCommand
+  .command('reset')
+  .description('Reset all skills to manifest defaults')
+  .action(async () => {
+    const { resetSkills } = await import('./config.js');
+    const { clearPromptCache } = await import('./skills/index.js');
+
+    await resetSkills();
+    clearPromptCache();
+    console.log(chalk.green('✅ Skills reset to manifest defaults'));
+  });
+
+// Default action for skills (show list)
+skillsCommand.action(async () => {
+  const { listSkills } = await import('./skills/index.js');
+  const skills = await listSkills();
+
+  console.log(chalk.cyan('\n┌─ Skills ───────────────────────────────────────────────┐'));
+  console.log(chalk.cyan('│ ') + chalk.white('Cognitive capabilities for the I/We layers'));
+  console.log(chalk.cyan('│ '));
+
+  for (const skill of skills) {
+    const status = skill.enabled ? chalk.green('✅') : chalk.gray('○ ');
+    const layers = skill.layers.map(l => l === 'i-layer' ? 'I' : 'We').join('+');
+    const override = skill.overridden ? chalk.yellow(' (override)') : '';
+    console.log(chalk.cyan('│ ') + `${status} ${chalk.white(skill.name)} ${chalk.gray(`(${layers})`)}${override}`);
+    console.log(chalk.cyan('│ ') + chalk.gray(`   ${skill.description}`));
+  }
+
+  console.log(chalk.cyan('│ '));
+  console.log(chalk.cyan('└────────────────────────────────────────────────────────┘'));
+  console.log(chalk.gray('\nLayers: I = I-Layer (conscious), We = We-Layer (subconscious)'));
+  console.log(chalk.gray('Commands: zosia config skills enable <id> | disable <id> | reset'));
+});
+
 // Default config action (show)
 configCommand.action(() => {
   console.log(chalk.cyan('\n┌─ Zosia Configuration ──────────────────────────────────┐'));
@@ -1290,6 +1404,7 @@ configCommand.action(() => {
   console.log(chalk.gray('  zosia config prompt <type>           View/edit system prompts'));
   console.log(chalk.gray('  zosia config costs                   View cost tracking'));
   console.log(chalk.gray('  zosia config claude-code             Check unconscious layer status'));
+  console.log(chalk.gray('  zosia config skills                  List and manage skills'));
   console.log(chalk.gray('  zosia config reset                   Reset to defaults'));
 });
 

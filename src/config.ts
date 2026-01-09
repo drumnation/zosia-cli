@@ -75,6 +75,14 @@ export interface ConsciousMindConfig {
   maxTokens: number;           // Max response tokens
 }
 
+// Mind Skills configuration
+export interface MindSkillsConfig {
+  // Explicitly enabled skills (overrides defaultEnabled: false)
+  enabled: string[];
+  // Explicitly disabled skills (overrides defaultEnabled: true)
+  disabled: string[];
+}
+
 // Custom system prompts
 export interface CustomPrompts {
   conscious?: string;          // Override I-Layer prompt
@@ -109,6 +117,9 @@ export interface ConfigData {
 
   // === Custom Prompts ===
   customPrompts?: CustomPrompts;
+
+  // === Mind Skills ===
+  mindSkills?: MindSkillsConfig;
 
   // === Cost Tracking ===
   costTracking: CostTracking;
@@ -496,6 +507,64 @@ export async function clearAllCustomPrompts(): Promise<void> {
   saveConfig(config);
   debugLog('All custom prompts cleared');
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Mind Skills Config
+// ═══════════════════════════════════════════════════════════════════════════
+
+export function getMindSkillsConfig(): MindSkillsConfig {
+  const config = loadConfig();
+  return config.mindSkills ?? { enabled: [], disabled: [] };
+}
+
+export async function enableMindSkill(skillId: string): Promise<void> {
+  const config = loadConfig();
+  if (!config.mindSkills) {
+    config.mindSkills = { enabled: [], disabled: [] };
+  }
+
+  // Remove from disabled if present
+  config.mindSkills.disabled = config.mindSkills.disabled.filter(id => id !== skillId);
+
+  // Add to enabled if not already
+  if (!config.mindSkills.enabled.includes(skillId)) {
+    config.mindSkills.enabled.push(skillId);
+  }
+
+  saveConfig(config);
+  debugLog(`Mind skill enabled: ${skillId}`);
+}
+
+export async function disableMindSkill(skillId: string): Promise<void> {
+  const config = loadConfig();
+  if (!config.mindSkills) {
+    config.mindSkills = { enabled: [], disabled: [] };
+  }
+
+  // Remove from enabled if present
+  config.mindSkills.enabled = config.mindSkills.enabled.filter(id => id !== skillId);
+
+  // Add to disabled if not already
+  if (!config.mindSkills.disabled.includes(skillId)) {
+    config.mindSkills.disabled.push(skillId);
+  }
+
+  saveConfig(config);
+  debugLog(`Mind skill disabled: ${skillId}`);
+}
+
+export async function resetMindSkills(): Promise<void> {
+  const config = loadConfig();
+  delete config.mindSkills;
+  saveConfig(config);
+  debugLog('Mind skills config reset to defaults');
+}
+
+// Alias functions for new "skills" naming (maintains backward compatibility)
+export const getSkillsConfig = getMindSkillsConfig;
+export const enableSkill = enableMindSkill;
+export const disableSkill = disableMindSkill;
+export const resetSkills = resetMindSkills;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Handoff Settings

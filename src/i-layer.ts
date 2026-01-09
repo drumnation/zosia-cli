@@ -5,6 +5,7 @@
 
 import type { Mindstate } from './types.js';
 import { I_LAYER_PROMPT, IDENTITY_KERNEL } from './prompts.js';
+import { getILayerPrompt } from './skills/index.js';
 import {
   getConsciousMindConfig,
   getOpenRouterKey,
@@ -201,9 +202,10 @@ export async function callConscious(
     }
   }
 
-  // Build system prompt (use custom if set)
-  let systemPrompt = customPrompts?.conscious || I_LAYER_PROMPT;
-  systemPrompt += '\n\n' + formatMindstate(mindstate);
+  // Build system prompt with mind skills composed
+  // Custom prompts override everything, otherwise use composed prompt with mind skills
+  const basePrompt = customPrompts?.conscious || await getILayerPrompt();
+  let systemPrompt = basePrompt + '\n\n' + formatMindstate(mindstate);
 
   // Build messages (supports both text-only and multimodal)
   const messages: ChatMessage[] = [
@@ -336,9 +338,10 @@ export async function* streamConscious(
     selectedModel = DEFAULT_VISION_MODEL;
   }
 
-  // Build system prompt (use custom if set)
-  let systemPrompt = customPrompts?.conscious || I_LAYER_PROMPT;
-  systemPrompt += '\n\n' + formatMindstate(mindstate);
+  // Build system prompt with mind skills composed
+  // Custom prompts override everything, otherwise use composed prompt with mind skills
+  const basePrompt = customPrompts?.conscious || await getILayerPrompt();
+  let systemPrompt = basePrompt + '\n\n' + formatMindstate(mindstate);
 
   // Build user message (multimodal if images present)
   const userContent: string | MultimodalContent[] = hasImages
