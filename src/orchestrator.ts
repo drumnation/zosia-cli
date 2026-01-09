@@ -12,6 +12,12 @@ import { callConscious, streamConscious } from './i-layer.js';
 import { retrieveDeeper, persistConversation, getGraphitiStatus } from './we-layer.js';
 import { IDENTITY_KERNEL } from './prompts.js';
 import { incrementSessionCount } from './config.js';
+import {
+  calculateTemporalContext,
+  recordSessionTimestamp,
+  formatTemporalForMindstate,
+  type TemporalContext
+} from './temporal.js';
 
 // Simple in-memory session state (V0)
 // Future: Graphiti persistence
@@ -29,6 +35,10 @@ interface ContextBrief {
   relevantMemories: Association[];
   userPreferences: string[];
   relationshipHistory: string | null;
+
+  // Temporal awareness - REAL time tracking
+  temporalContext: TemporalContext | null;
+  temporalFormatted: string | null;
 
   // Emotional analysis
   detectedEmotion: string;
@@ -94,6 +104,11 @@ function buildMindstate(
 function buildEnrichedSnapshot(brief: ContextBrief, isNewConversation: boolean): string {
   const parts: string[] = [];
 
+  // TEMPORAL CONTEXT - First and most important (felt time awareness)
+  if (brief.temporalFormatted) {
+    parts.push(brief.temporalFormatted);
+  }
+
   // Emotional awareness
   if (brief.detectedEmotion !== 'neutral') {
     parts.push(`The person seems ${brief.detectedEmotion}.`);
@@ -140,6 +155,9 @@ function buildEnrichedSnapshot(brief: ContextBrief, isNewConversation: boolean):
   return parts.filter(p => p).join(' ');
 }
 
+// Track if we've already surfaced temporal awareness this session
+const temporalSurfacedThisSession = new Map<string, boolean>();
+
 /**
  * Assemble context brief using We-Layer (Claude)
  * This is the "brain" that makes the smaller model appear smarter
@@ -162,25 +180,56 @@ async function assembleContextBrief(
 
   if (debug) {
     console.log(`│   Found ${weLayerResult.associations.length} associations (${weLayerResult.latencyMs}ms)`);
-    console.log('│ Phase 2: Analyzing context...');
+    console.log('│ Phase 2: Calculating temporal context...');
   }
 
-  // Phase 2: Analyze the message and context
+  // Phase 2: Calculate REAL temporal context (time since last conversation)
+  const alreadySurfaced = temporalSurfacedThisSession.get(userId) ?? false;
+  let temporalContext: TemporalContext | null = null;
+  let temporalFormatted: string | null = null;
+
+  try {
+    temporalContext = await calculateTemporalContext(userId, alreadySurfaced);
+    temporalFormatted = formatTemporalForMindstate(temporalContext);
+
+    // Mark temporal as surfaced if it will be shown
+    if (temporalContext.shouldSurface) {
+      temporalSurfacedThisSession.set(userId, true);
+    }
+
+    if (debug) {
+      console.log(`│   Gap: ${temporalContext.gap.humanReadable} (${temporalContext.gap.significance})`);
+      console.log(`│   Time: ${temporalContext.timeOfDay.period}, ${temporalContext.dayOfWeek.day}`);
+      if (temporalContext.shouldSurface) {
+        console.log(`│   Surfacing: ${temporalContext.surfaceType} - "${temporalContext.feltSuggestion}"`);
+      }
+    }
+  } catch (e) {
+    if (debug) {
+      console.log(`│   ⚠️ Temporal calculation failed: ${e instanceof Error ? e.message : 'unknown'}`);
+    }
+  }
+
+  if (debug) {
+    console.log('│ Phase 3: Analyzing context...');
+  }
+
+  // Phase 3: Analyze the message and context
   const analysis = analyzeMessage(message, previousTurns);
 
-  // Phase 3: Extract user preferences from memories
+  // Phase 4: Extract user preferences from memories
   const userPreferences = extractUserPreferences(weLayerResult.associations);
 
-  // Phase 4: Build relationship context
+  // Phase 5: Build relationship context
   const relationshipHistory = buildRelationshipContext(previousTurns, weLayerResult.associations);
 
-  // Phase 5: Determine response approach
+  // Phase 6: Determine response approach
   const approach = determineApproach(analysis.intent, analysis.emotion, previousTurns.length);
 
   const processingTimeMs = Date.now() - startTime;
 
   if (debug) {
-    console.log(`│ Phase 3: Context assembled in ${processingTimeMs}ms`);
+    console.log(`│ Phase 4: Context assembled in ${processingTimeMs}ms`);
     console.log('│');
     console.log(`│ 📊 Analysis:`);
     console.log(`│   Emotion: ${analysis.emotion}`);
@@ -197,6 +246,16 @@ async function assembleContextBrief(
         console.log(`│   • [${assoc.type}] ${assoc.text.slice(0, 50)}...`);
       }
     }
+    if (temporalContext) {
+      console.log('│');
+      console.log('│ ⏰ Temporal Awareness:');
+      console.log(`│   • Last conversation: ${temporalContext.gap.humanReadable}`);
+      console.log(`│   • Time: ${temporalContext.timeOfDay.period} (${temporalContext.timeOfDay.hour}:00)`);
+      console.log(`│   • Day: ${temporalContext.dayOfWeek.day}${temporalContext.dayOfWeek.isWeekend ? ' (weekend)' : ''}`);
+      if (temporalContext.pendingEvents.length > 0) {
+        console.log(`│   • Events: ${temporalContext.pendingEvents.length} tracked`);
+      }
+    }
     console.log('└────────────────────────────────────────────────────────┘');
   }
 
@@ -204,6 +263,8 @@ async function assembleContextBrief(
     relevantMemories: weLayerResult.associations,
     userPreferences,
     relationshipHistory,
+    temporalContext,
+    temporalFormatted,
     detectedEmotion: analysis.emotion,
     emotionalContext: analysis.emotionalContext,
     primaryIntent: analysis.intent,
@@ -482,12 +543,19 @@ export async function chat(
   finalMindstate.workingMemory.lastTopic = extractTopic(message);
 
   // ═══════════════════════════════════════════════════════════════════
-  // PHASE 5: PERSIST TO MEMORY (NON-BLOCKING)
+  // PHASE 5: PERSIST TO MEMORY AND RECORD TIMESTAMP (NON-BLOCKING)
   // ═══════════════════════════════════════════════════════════════════
 
   persistConversation(userId, message, finalResponse, debug).catch((err) => {
     if (debug) {
       console.log(`│ ⚠️ Memory persistence failed: ${err.message}`);
+    }
+  });
+
+  // Record session timestamp for temporal tracking
+  recordSessionTimestamp(userId).catch((err) => {
+    if (debug) {
+      console.log(`│ ⚠️ Session timestamp failed: ${err instanceof Error ? err.message : 'unknown'}`);
     }
   });
 
@@ -630,6 +698,9 @@ export async function* chatStream(
 
   // Persist (non-blocking)
   persistConversation(userId, message, fullResponse, debug).catch(() => {});
+
+  // Record session timestamp for temporal tracking
+  recordSessionTimestamp(userId).catch(() => {});
 
   // Done
   yield { type: 'done', turn };
