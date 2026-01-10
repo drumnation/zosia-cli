@@ -47,4 +47,20 @@ export declare function countCodeBlocks(text: string): number;
  * Get all code blocks from text
  */
 export declare function getAllCodeBlocks(text: string): ExtractedCodeBlock[];
+/** Result of a clipboard paste operation */
+export interface PasteResult {
+    type: 'text' | 'image' | 'empty' | 'error';
+    text?: string;
+    imagePath?: string;
+    error?: string;
+}
+/**
+ * Read from clipboard - handles both text and images
+ * For images, saves to temp file and returns the path
+ */
+export declare function pasteFromClipboard(): Promise<PasteResult>;
+/**
+ * Synchronous paste - for use in useInput handlers
+ */
+export declare function pasteFromClipboardSync(): PasteResult;
 //# sourceMappingURL=clipboard.d.ts.map

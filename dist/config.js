@@ -346,6 +346,52 @@ export async function clearAllCustomPrompts() {
     debugLog('All custom prompts cleared');
 }
 // ═══════════════════════════════════════════════════════════════════════════
+// Mind Skills Config
+// ═══════════════════════════════════════════════════════════════════════════
+export function getMindSkillsConfig() {
+    const config = loadConfig();
+    return config.mindSkills ?? { enabled: [], disabled: [] };
+}
+export async function enableMindSkill(skillId) {
+    const config = loadConfig();
+    if (!config.mindSkills) {
+        config.mindSkills = { enabled: [], disabled: [] };
+    }
+    // Remove from disabled if present
+    config.mindSkills.disabled = config.mindSkills.disabled.filter(id => id !== skillId);
+    // Add to enabled if not already
+    if (!config.mindSkills.enabled.includes(skillId)) {
+        config.mindSkills.enabled.push(skillId);
+    }
+    saveConfig(config);
+    debugLog(`Mind skill enabled: ${skillId}`);
+}
+export async function disableMindSkill(skillId) {
+    const config = loadConfig();
+    if (!config.mindSkills) {
+        config.mindSkills = { enabled: [], disabled: [] };
+    }
+    // Remove from enabled if present
+    config.mindSkills.enabled = config.mindSkills.enabled.filter(id => id !== skillId);
+    // Add to disabled if not already
+    if (!config.mindSkills.disabled.includes(skillId)) {
+        config.mindSkills.disabled.push(skillId);
+    }
+    saveConfig(config);
+    debugLog(`Mind skill disabled: ${skillId}`);
+}
+export async function resetMindSkills() {
+    const config = loadConfig();
+    delete config.mindSkills;
+    saveConfig(config);
+    debugLog('Mind skills config reset to defaults');
+}
+// Alias functions for new "skills" naming (maintains backward compatibility)
+export const getSkillsConfig = getMindSkillsConfig;
+export const enableSkill = enableMindSkill;
+export const disableSkill = disableMindSkill;
+export const resetSkills = resetMindSkills;
+// ═══════════════════════════════════════════════════════════════════════════
 // Handoff Settings
 // ═══════════════════════════════════════════════════════════════════════════
 const DEFAULT_HANDOFF_THRESHOLD = 80;

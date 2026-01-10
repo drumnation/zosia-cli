@@ -36,7 +36,8 @@ import { chatStream, clearSession } from './orchestrator.js';
 import { initWeLayerPool, shutdownWeLayerPool, getGraphitiStatusAsync, detectClaudeCodeAuth, } from './we-layer.js';
 import { parseAttachments, readAttachmentContent, getImageAttachments, } from './attachments.js';
 import { highlightCode, parseCodeBlocks } from './syntax-highlight.js';
-import { copyToClipboard, extractCodeBlock, countCodeBlocks, getAllCodeBlocks } from './clipboard.js';
+import { copyToClipboard, extractCodeBlock, countCodeBlocks, getAllCodeBlocks, pasteFromClipboardSync } from './clipboard.js';
+import { encodeImageToken, decodeImageTokens, hasImageTokens } from './image-preview.js';
 import { createHistoryManager, getDefaultHistoryPath } from './history.js';
 import { createMultilineHandler } from './multiline-input.js';
 import { useFileAutocomplete, FileAutocompleteDropdown } from './file-autocomplete.js';
@@ -47,7 +48,8 @@ import { createRetryHandler } from './retry.js';
 import { saveSession, loadSession, listSessions, deleteSession, getSessionPath, exportToMarkdown, exportToJSON, generateSessionName, } from './session.js';
 import { getHandoffConfig, setHandoffPrompt, resetHandoffPrompt, setHandoffThreshold, shouldTriggerHandoff, createHandoffSummary, DEFAULT_HANDOFF_PROMPT, } from './context-handoff.js';
 import { getSession as getAuthSession } from './auth.js';
-import { getCustomPrompts, setCustomPrompt, clearCustomPrompt, clearAllCustomPrompts } from './config.js';
+import { getCustomPrompts, setCustomPrompt, clearCustomPrompt, clearAllCustomPrompts, getConsciousMindConfig, setConsciousMindModel } from './config.js';
+import { getNextRecommendedModel, getPreviousRecommendedModel, getModelShortInfo, getModelPosition, RECOMMENDED_CONSCIOUS_MODELS } from './model-service.js';
 import { I_LAYER_PROMPT, WE_LAYER_PROMPT, IDENTITY_KERNEL } from './prompts.js';
 import { createSessionTracker, formatSessionInfo } from './session-tracker.js';
 import { getOnboardingStatus, formatOnboardingStatus, setOpenRouterKeyFromInput, setModelFromInput, } from './onboarding.js';
@@ -281,7 +283,11 @@ const KeyboardShortcutsPanel = memo(({ visible, onClose }) => {
 });
 KeyboardShortcutsPanel.displayName = 'KeyboardShortcutsPanel';
 /** Header bar with token/cost display - memoized */
-const Header = memo(({ verbose, memoryActive, phase, tokenStats, viewMode, otherSessions = [], }) => {
+const Header = memo(({ verbose, memoryActive, phase, tokenStats, viewMode, otherSessions = [], terminalWidth = 80, }) => {
+    // Responsive breakpoints for header content
+    const isCompact = terminalWidth < 80;
+    const isMedium = terminalWidth >= 80 && terminalWidth < 120;
+    const isWide = terminalWidth >= 120;
     const phaseEmoji = {
         idle: '○',
         receiving: '◀',
@@ -308,11 +314,18 @@ const Header = memo(({ verbose, memoryActive, phase, tokenStats, viewMode, other
     const contextBar = contextPercent > 0
         ? `[${('█'.repeat(Math.round(contextPercent / 10)) + '░'.repeat(10 - Math.round(contextPercent / 10))).slice(0, 10)}]`
         : '';
-    return (_jsxs(Box, { borderStyle: "double", borderColor: C.purple, paddingX: 1, marginBottom: 0, justifyContent: "space-between", children: [_jsxs(Box, { children: [_jsx(Text, { bold: true, color: C.purple, children: "\u2727 ZOSIA" }), _jsxs(Text, { color: C.gray, children: [" v", pkg.version] }), _jsx(Text, { color: C.gray, children: " \u00B7 Unified Being" }), _jsx(Text, { color: C.gray, children: " " }), _jsx(Text, { color: C.yellow, children: phaseEmoji[phase] })] }), _jsxs(Box, { children: [contextPercent > 0 && (_jsxs(_Fragment, { children: [_jsx(Text, { color: contextColor, children: contextBar }), _jsxs(Text, { color: contextColor, children: [" ", contextPercent, "%"] }), _jsx(Text, { color: C.gray, children: " \u00B7 " })] })), totalTokens > 0 && (_jsxs(_Fragment, { children: [_jsx(Text, { color: C.green, children: tokenDisplay }), costDisplay && _jsxs(Text, { color: C.orange, children: [" ", costDisplay] }), _jsx(Text, { color: C.gray, children: " \u00B7 " })] })), _jsxs(Text, { color: C.purple, children: ["[", VIEW_MODE_LABELS[viewMode], "]"] }), _jsx(Text, { color: C.gray, children: " \u00B7 " }), _jsx(Text, { children: memoryActive ? '🧠' : '⚠️' }), _jsx(Text, { color: C.gray, children: " Memory" }), otherSessions.length > 0 && (_jsxs(_Fragment, { children: [_jsx(Text, { color: C.gray, children: " \u00B7 " }), _jsxs(Text, { color: C.orange, children: ["\uD83D\uDD17 +", otherSessions.length] }), _jsx(Text, { color: C.gray, children: " bg" })] })), _jsx(Text, { dimColor: true, children: " \u00B7 Tab to cycle" })] })] }));
+    // Short view mode labels for compact display
+    const viewModeShort = {
+        companion: 'Cmp',
+        summary: 'Sum',
+        split: 'Spl',
+        developer: 'Dev',
+    };
+    return (_jsxs(Box, { borderStyle: "double", borderColor: C.purple, paddingX: 1, marginBottom: 0, justifyContent: "space-between", overflow: "hidden", children: [_jsxs(Box, { flexShrink: 0, children: [_jsx(Text, { bold: true, color: C.purple, children: "\u2727 ZOSIA" }), !isCompact && _jsxs(Text, { color: C.gray, children: [" v", pkg.version] }), isWide && _jsx(Text, { color: C.gray, children: " \u00B7 Being" }), _jsx(Text, { color: C.gray, children: " " }), _jsx(Text, { color: C.yellow, children: phaseEmoji[phase] })] }), _jsxs(Box, { flexShrink: 1, overflow: "hidden", children: [!isCompact && contextPercent > 0 && (_jsxs(_Fragment, { children: [_jsx(Text, { color: contextColor, children: contextBar }), _jsxs(Text, { color: contextColor, children: [" ", contextPercent, "%"] }), _jsx(Text, { color: C.gray, children: " \u00B7 " })] })), !isCompact && totalTokens > 0 && (_jsxs(_Fragment, { children: [_jsx(Text, { color: C.green, children: tokenDisplay }), costDisplay && _jsxs(Text, { color: C.orange, children: [" ", costDisplay] }), _jsx(Text, { color: C.gray, children: " \u00B7 " })] })), _jsxs(Text, { color: C.purple, children: ["[", isCompact ? viewModeShort[viewMode] : VIEW_MODE_LABELS[viewMode], "]"] }), _jsx(Text, { color: C.gray, children: " \u00B7 " }), _jsx(Text, { children: memoryActive ? '🧠' : '⚠️' }), !isCompact && _jsx(Text, { color: C.gray, children: " Mem" }), !isCompact && otherSessions.length > 0 && (_jsxs(_Fragment, { children: [_jsx(Text, { color: C.gray, children: " \u00B7 " }), _jsxs(Text, { color: C.orange, children: ["\uD83D\uDD17+", otherSessions.length] })] })), isWide && _jsx(Text, { dimColor: true, children: " \u00B7 Tab" })] })] }));
 });
 Header.displayName = 'Header';
 /** Internal State Panel - Shows Zosia's unified being state - memoized */
-const InternalStatePanel = memo(({ being, status }) => (_jsxs(Panel, { title: "\u2500 Internal State \u2500", borderColor: C.purple, children: [_jsxs(Box, { flexDirection: "column", marginBottom: 1, children: [_jsxs(Box, { children: [_jsx(Text, { color: being.unconscious.active ? C.blue : C.gray, children: "\uD83D\uDCAD " }), _jsx(Text, { bold: true, color: being.unconscious.active ? C.blue : C.gray, children: "Unconscious" }), _jsx(Text, { dimColor: true, children: " (We)" }), status.memory.connected && _jsx(Text, { color: C.green, children: " \u25CF" })] }), _jsx(Box, { marginLeft: 3, flexDirection: "column", children: _jsxs(Box, { flexDirection: "column", children: [_jsx(Text, { color: C.gray, children: "Sensing: " }), _jsx(Text, { color: C.blue, wrap: "wrap", children: being.unconscious.sensing || '...' })] }) }), _jsxs(Box, { marginLeft: 3, children: [_jsx(Text, { color: C.gray, children: "Memories: " }), _jsx(Text, { color: C.orange, children: being.unconscious.memories })] })] }), _jsxs(Box, { marginLeft: 2, marginBottom: 1, flexDirection: "column", children: [_jsxs(Box, { children: [_jsx(Text, { color: C.gray, children: "\u251C\u2500\u2500 " }), _jsx(Text, { dimColor: true, italic: true, children: "emotion: " }), _jsx(Text, { color: C.yellow, wrap: "wrap", children: being.integration.emotion || 'neutral' })] }), _jsxs(Box, { marginLeft: 4, children: [_jsx(Text, { dimColor: true, italic: true, children: "intent: " }), _jsx(Text, { color: C.cyan, wrap: "wrap", children: being.integration.intent || 'listening' })] })] }), _jsxs(Box, { flexDirection: "column", children: [_jsxs(Box, { children: [_jsx(Text, { color: being.conscious.active ? C.green : C.gray, children: "\uD83E\uDDE0 " }), _jsx(Text, { bold: true, color: being.conscious.active ? C.green : C.gray, children: "Conscious" }), _jsx(Text, { dimColor: true, children: " (I)" }), status.iLayer.ready && _jsx(Text, { color: C.green, children: " \u25CF" })] }), _jsxs(Box, { marginLeft: 3, flexDirection: "column", children: [_jsx(Text, { color: C.gray, children: "Thinking: " }), _jsx(Text, { color: C.green, wrap: "wrap", children: being.conscious.thinking || '...' })] }), being.conscious.tokens.output > 0 && (_jsx(Box, { marginLeft: 3, children: _jsxs(Text, { dimColor: true, children: ["Tokens: ", being.conscious.tokens.input, "\u2192", being.conscious.tokens.output] }) }))] })] })));
+const InternalStatePanel = memo(({ being, status }) => (_jsxs(Panel, { title: "\u2500 Internal State \u2500", borderColor: C.purple, overflow: "hidden", children: [_jsxs(Box, { flexDirection: "column", marginBottom: 1, children: [_jsxs(Box, { children: [_jsx(Text, { color: being.unconscious.active ? C.blue : C.gray, children: "\uD83D\uDCAD " }), _jsx(Text, { bold: true, color: being.unconscious.active ? C.blue : C.gray, children: "Unconscious" }), _jsx(Text, { dimColor: true, children: " (We)" }), status.memory.connected && _jsx(Text, { color: C.green, children: " \u25CF" })] }), _jsxs(Box, { marginLeft: 3, children: [_jsx(Text, { color: C.gray, children: "Sensing: " }), _jsx(Text, { color: C.blue, children: being.unconscious.sensing || '...' })] }), _jsxs(Box, { marginLeft: 3, children: [_jsx(Text, { color: C.gray, children: "Memories: " }), _jsx(Text, { color: C.orange, children: being.unconscious.memories })] }), being.unconscious.associations.length > 0 && (_jsxs(Box, { marginLeft: 3, flexDirection: "column", children: [_jsx(Text, { color: C.gray, children: "Associations:" }), being.unconscious.associations.slice(0, 3).map((assoc, i) => (_jsx(Box, { marginLeft: 2, children: _jsxs(Text, { color: C.blue, children: ["\u2022 ", assoc] }) }, i))), being.unconscious.associations.length > 3 && (_jsx(Box, { marginLeft: 2, children: _jsxs(Text, { dimColor: true, children: ["+", being.unconscious.associations.length - 3, " more"] }) }))] }))] }), _jsxs(Box, { marginLeft: 2, marginBottom: 1, flexDirection: "column", children: [_jsxs(Box, { children: [_jsx(Text, { color: C.gray, children: "\u251C\u2500\u2500 " }), _jsx(Text, { dimColor: true, italic: true, children: "emotion: " }), _jsx(Text, { color: C.yellow, children: being.integration.emotion || 'neutral' })] }), _jsxs(Box, { marginLeft: 4, children: [_jsx(Text, { dimColor: true, italic: true, children: "intent: " }), _jsx(Text, { color: C.cyan, children: being.integration.intent || 'listening' })] }), _jsxs(Box, { marginLeft: 4, children: [_jsx(Text, { dimColor: true, italic: true, children: "depth: " }), _jsx(Text, { color: C.purple, children: being.integration.depth || 'brief' })] })] }), _jsxs(Box, { flexDirection: "column", children: [_jsxs(Box, { children: [_jsx(Text, { color: being.conscious.active ? C.green : C.gray, children: "\uD83E\uDDE0 " }), _jsx(Text, { bold: true, color: being.conscious.active ? C.green : C.gray, children: "Conscious" }), _jsx(Text, { dimColor: true, children: " (I)" }), status.iLayer.ready && _jsx(Text, { color: C.green, children: " \u25CF" })] }), _jsxs(Box, { marginLeft: 3, children: [_jsx(Text, { color: C.gray, children: "Thinking: " }), _jsx(Text, { color: C.green, children: being.conscious.thinking || '...' })] }), being.conscious.tokens.output > 0 && (_jsx(Box, { marginLeft: 3, children: _jsxs(Text, { dimColor: true, children: ["Tokens: ", being.conscious.tokens.input, "\u2192", being.conscious.tokens.output] }) }))] })] })));
 InternalStatePanel.displayName = 'InternalStatePanel';
 /** Neural Flow Panel - Visualizes the processing flow - memoized */
 const NeuralFlowPanel = memo(({ phase, status }) => {
@@ -359,6 +372,11 @@ const SessionStatsPanel = memo(({ tokenStats, logs, status }) => {
                                         (tokenStats?.contextPercent ?? 0) >= 50 ? C.yellow : C.green, children: [tokenStats?.contextPercent ?? 0, "%"] })] }), tokenStats && tokenStats.sessionCost > 0 && (_jsxs(Box, { marginLeft: 2, children: [_jsx(Text, { color: C.gray, children: "Cost: " }), _jsx(Text, { color: C.orange, children: formatCost(tokenStats.sessionCost) })] }))] }), _jsxs(Box, { flexDirection: "column", marginBottom: 1, children: [_jsx(Text, { color: C.gray, bold: true, children: "Messages" }), _jsxs(Box, { marginLeft: 2, children: [_jsx(Text, { color: C.gray, children: "You: " }), _jsx(Text, { color: C.cyan, children: userMessages })] }), _jsxs(Box, { marginLeft: 2, children: [_jsx(Text, { color: C.gray, children: "Zosia: " }), _jsx(Text, { color: C.purple, children: responseMessages })] }), _jsxs(Box, { marginLeft: 2, children: [_jsx(Text, { color: C.gray, children: "Total: " }), _jsx(Text, { color: C.white, children: messageCount })] })] }), _jsxs(Box, { flexDirection: "column", children: [_jsx(Text, { color: C.gray, bold: true, children: "System" }), _jsxs(Box, { marginLeft: 2, children: [_jsx(Text, { color: C.gray, children: "Memory: " }), _jsx(Text, { color: status.memory.connected ? C.green : C.red, children: status.memory.connected ? '● Connected' : '○ Disconnected' })] }), _jsxs(Box, { marginLeft: 2, children: [_jsx(Text, { color: C.gray, children: "I-Layer: " }), _jsx(Text, { color: status.iLayer.ready ? C.green : C.yellow, children: status.iLayer.ready ? '● Ready' : '○ Initializing' })] })] })] }));
 });
 SessionStatsPanel.displayName = 'SessionStatsPanel';
+/** Context Brief Panel - Shows We-Layer context analysis - DEBUGGING PANEL */
+const ContextBriefPanel = memo(({ contextBrief, being }) => {
+    return (_jsxs(Panel, { title: "\u2500 Context Brief \u2500", borderColor: C.yellow, children: [_jsxs(Box, { flexDirection: "column", marginBottom: 1, children: [_jsx(Text, { color: C.gray, bold: true, children: "Emotional State" }), _jsx(Box, { marginLeft: 2, flexDirection: "column", children: _jsxs(Box, { children: [_jsx(Text, { color: C.gray, children: "Detected: " }), _jsx(Text, { color: C.yellow, children: contextBrief?.emotion || being.integration.emotion || '...' })] }) })] }), _jsxs(Box, { flexDirection: "column", marginBottom: 1, children: [_jsx(Text, { color: C.gray, bold: true, children: "Intent Analysis" }), _jsx(Box, { marginLeft: 2, flexDirection: "column", children: _jsxs(Box, { children: [_jsx(Text, { color: C.gray, children: "Intent: " }), _jsx(Text, { color: C.cyan, children: contextBrief?.intent || being.integration.intent || '...' })] }) })] }), _jsxs(Box, { flexDirection: "column", marginBottom: 1, children: [_jsx(Text, { color: C.gray, bold: true, children: "Processing Depth" }), _jsxs(Box, { marginLeft: 2, children: [_jsx(Text, { color: C.gray, children: "Level: " }), _jsx(Text, { color: C.purple, children: contextBrief?.depth || being.integration.depth || 'brief' })] })] }), _jsxs(Box, { flexDirection: "column", marginBottom: 1, children: [_jsx(Text, { color: C.gray, bold: true, children: "Memory" }), _jsxs(Box, { marginLeft: 2, children: [_jsx(Text, { color: C.gray, children: "Retrieved: " }), _jsx(Text, { color: C.orange, children: contextBrief?.memoriesUsed || being.unconscious.memories || 0 })] })] }), _jsxs(Box, { flexDirection: "column", children: [_jsx(Text, { color: C.gray, bold: true, children: "Associations" }), being.unconscious.associations.length > 0 ? (being.unconscious.associations.map((assoc, i) => (_jsxs(Box, { marginLeft: 2, children: [_jsx(Text, { color: C.gray, children: "\u2022 " }), _jsx(Text, { color: C.blue, children: assoc })] }, i)))) : (_jsx(Box, { marginLeft: 2, children: _jsx(Text, { dimColor: true, italic: true, children: "None surfaced" }) }))] })] }));
+});
+ContextBriefPanel.displayName = 'ContextBriefPanel';
 /** Mind Activity Log - Shows the being's internal processing - memoized with custom comparison */
 const MindActivity = memo(({ logs, maxLines, streamingLogId, selectedCodeBlock = 0, expandedCodeBlocks = new Set(), onCodeBlockCopy, onToggleExpand }) => {
     const visibleLogs = logs.slice(-maxLines);
@@ -379,7 +397,7 @@ const MindActivity = memo(({ logs, maxLines, streamingLogId, selectedCodeBlock =
         error: '✗',
         user: '◀',
     };
-    return (_jsx(Panel, { title: "\u2500 Mind Activity \u2500", borderColor: C.gray, flexGrow: 1, children: _jsx(Box, { flexDirection: "column", flexGrow: 1, children: visibleLogs.length === 0 ? (_jsx(Text, { dimColor: true, italic: true, children: "Activity will appear here..." })) : (visibleLogs.map((entry) => {
+    return (_jsx(Panel, { title: "\u2500 Mind Activity \u2500", borderColor: C.gray, flexGrow: 1, overflow: "hidden", children: _jsx(Box, { flexDirection: "column", flexGrow: 1, overflow: "hidden", children: visibleLogs.length === 0 ? (_jsx(Text, { dimColor: true, italic: true, children: "Activity will appear here..." })) : (visibleLogs.map((entry) => {
                 const timeStr = entry.timestamp.toLocaleTimeString('en-US', {
                     hour12: false,
                     hour: '2-digit',
@@ -398,7 +416,16 @@ const MindActivity = memo(({ logs, maxLines, streamingLogId, selectedCodeBlock =
                     const codeBlockCount = countCodeBlocks(entry.message);
                     return (_jsxs(Box, { flexDirection: "column", children: [_jsxs(Box, { children: [_jsxs(Text, { dimColor: true, children: [timeStr, " "] }), _jsx(Text, { color: C.purple, children: "\u25BA " }), _jsx(Text, { color: C.purple, bold: true, children: "Zosia:" }), isCurrentlyStreaming && (_jsx(Text, { color: C.yellow, dimColor: true, children: " streaming..." })), !isCurrentlyStreaming && codeBlockCount > 0 && (_jsxs(Text, { color: C.gray, dimColor: true, children: [" (", codeBlockCount, " code block", codeBlockCount > 1 ? 's' : '', ")"] }))] }), _jsx(Box, { marginLeft: 2, children: isCurrentlyStreaming ? (_jsx(StreamingText, { text: entry.message, isStreaming: true, charsPerFrame: 5, frameMs: 12 })) : (_jsx(ResponseWithCodeBlocks, { message: entry.message, selectedBlockIndex: selectedCodeBlock, expandedBlocks: expandedCodeBlocks, onCopy: onCodeBlockCopy, onToggleExpand: onToggleExpand })) })] }, entry.id));
                 }
-                return (_jsxs(Box, { children: [_jsxs(Text, { dimColor: true, children: [timeStr, " "] }), _jsxs(Text, { color: color, children: [icon, " "] }), _jsxs(Text, { color: color, bold: true, children: ["[", entry.source.toUpperCase(), "]"] }), _jsxs(Text, { wrap: "wrap", children: [" ", entry.message] })] }, entry.id));
+                // Layer entries - single line with separator for stability
+                if (entry.level === 'layer' || entry.source === 'we-layer' || entry.source === 'i-layer') {
+                    return (_jsxs(Box, { marginBottom: 2, children: [_jsxs(Text, { dimColor: true, children: [timeStr, " "] }), _jsxs(Text, { color: color, children: [icon, " "] }), _jsxs(Text, { color: color, bold: true, children: ["[", entry.source.toUpperCase(), "]"] }), _jsx(Text, { color: color, children: " \u2192 " }), _jsx(Text, { color: color, wrap: "wrap", children: entry.message })] }, entry.id));
+                }
+                // Memory entries - single line with separator
+                if (entry.source === 'memory') {
+                    return (_jsxs(Box, { marginBottom: 2, children: [_jsxs(Text, { dimColor: true, children: [timeStr, " "] }), _jsx(Text, { color: C.orange, children: "\u25C6 " }), _jsx(Text, { color: C.orange, bold: true, children: "[MEMORY]" }), _jsx(Text, { color: C.orange, children: " \u2192 " }), _jsx(Text, { color: C.orange, wrap: "wrap", children: entry.message })] }, entry.id));
+                }
+                // Default single-line formatting for system/info
+                return (_jsxs(Box, { marginBottom: 2, children: [_jsxs(Text, { dimColor: true, children: [timeStr, " "] }), _jsxs(Text, { color: color, children: [icon, " "] }), _jsxs(Text, { color: color, children: ["[", entry.source.toUpperCase(), "]"] }), _jsx(Text, { children: " " }), _jsx(Text, { wrap: "wrap", children: entry.message })] }, entry.id));
             })) }) }));
 });
 MindActivity.displayName = 'MindActivity';
@@ -427,6 +454,47 @@ const InputArea = ({ value, onChange, onSubmit, processing, queueCount, onCancel
     const shouldInterceptEnter = useRef(false);
     // Handle special keys: autocomplete, history navigation and multi-line input
     useInput((input, key) => {
+        // Handle paste: Multiple detection methods for Ctrl+V / Cmd+V / Ctrl+Shift+V
+        // Note: In most terminals, Ctrl+V is intercepted by the terminal itself for paste.
+        // Kitty and other terminals paste directly to stdin. We detect:
+        // 1. Raw Ctrl+V character code (0x16 = \x16) - if terminal passes it through
+        // 2. 'v' with ctrl/meta modifier - if Ink detects the modifier
+        // 3. 'V' (uppercase) with ctrl - Ctrl+Shift+V (more likely to pass through)
+        // 4. Unicode control character
+        const isCtrlV = input === '\x16' ||
+            input === '\u0016' ||
+            (input === 'v' && (key.meta || key.ctrl)) ||
+            (input === 'V' && key.ctrl);
+        if (isCtrlV) {
+            const result = pasteFromClipboardSync();
+            if (result.type === 'text' && result.text) {
+                // Paste text at cursor position
+                onChange(value + result.text);
+                multilineRef.current.setValue(value + result.text);
+            }
+            else if (result.type === 'image' && result.imagePath) {
+                // Insert image path as @reference
+                const imageRef = `@${result.imagePath}`;
+                onChange(value + imageRef);
+                multilineRef.current.setValue(value + imageRef);
+            }
+            return;
+        }
+        // Handle Option+V on macOS - produces √ (square root symbol)
+        // This is a reliable paste trigger since terminals don't intercept it
+        if (input === '√' || input === 'v' && key.meta) {
+            const result = pasteFromClipboardSync();
+            if (result.type === 'text' && result.text) {
+                onChange(value + result.text);
+                multilineRef.current.setValue(value + result.text);
+            }
+            else if (result.type === 'image' && result.imagePath) {
+                const imageRef = `@${result.imagePath}`;
+                onChange(value + imageRef);
+                multilineRef.current.setValue(value + imageRef);
+            }
+            return;
+        }
         // File autocomplete takes priority when visible
         if (autocomplete.visible) {
             const handled = autocomplete.handleKeyPress({
@@ -496,6 +564,51 @@ const InputArea = ({ value, onChange, onSubmit, processing, queueCount, onCancel
     // Prompt prefix shows line count for multi-line
     const prefix = isMultiline ? `[${lines.length}]` : (processing ? '⋯' : '>');
     return (_jsxs(Box, { flexDirection: "column", width: "100%", children: [_jsx(FileAutocompleteDropdown, { results: autocomplete.results, selectedIndex: autocomplete.selectedIndex, query: autocomplete.query, visible: autocomplete.visible }), isMultiline && (_jsxs(Box, { flexDirection: "column", borderStyle: "single", borderColor: C.gray, paddingX: 1, marginBottom: 0, width: "100%", children: [_jsx(Text, { color: C.gray, dimColor: true, children: "\u250C Multi-line input (Enter to send, Shift+Enter for more lines)" }), previousLines.map((line, i) => (_jsx(Text, { color: C.white, wrap: "truncate", children: line || ' ' }, i)))] })), _jsxs(Box, { borderStyle: "single", borderColor: processing ? C.yellow : C.cyan, paddingX: 1, width: "100%", minHeight: 3, children: [_jsx(Box, { flexShrink: 0, children: _jsxs(Text, { color: C.cyan, bold: true, children: [prefix, ' '] }) }), _jsx(Box, { flexGrow: 1, overflowX: "hidden", children: _jsx(TextInput, { value: currentLine, onChange: (newCurrentLine) => {
+                                // Check if √ was typed (Option+V on macOS) - trigger paste instead
+                                if (newCurrentLine.includes('√') && !currentLine.includes('√')) {
+                                    // Remove the √ and trigger paste
+                                    const cleanedLine = newCurrentLine.replace('√', '');
+                                    const result = pasteFromClipboardSync();
+                                    if (result.type === 'text' && result.text) {
+                                        const pastedLine = cleanedLine + result.text;
+                                        if (isMultiline) {
+                                            const newValue = [...previousLines, pastedLine].join('\n');
+                                            multilineRef.current.setValue(newValue);
+                                            onChange(newValue);
+                                        }
+                                        else {
+                                            multilineRef.current.setValue(pastedLine);
+                                            onChange(pastedLine);
+                                        }
+                                    }
+                                    else if (result.type === 'image' && result.imagePath) {
+                                        // Use nice compact token instead of raw path
+                                        const imageToken = encodeImageToken(result.imagePath);
+                                        const pastedLine = cleanedLine + imageToken;
+                                        if (isMultiline) {
+                                            const newValue = [...previousLines, pastedLine].join('\n');
+                                            multilineRef.current.setValue(newValue);
+                                            onChange(newValue);
+                                        }
+                                        else {
+                                            multilineRef.current.setValue(pastedLine);
+                                            onChange(pastedLine);
+                                        }
+                                    }
+                                    else {
+                                        // No clipboard content, just remove the √
+                                        if (isMultiline) {
+                                            const newValue = [...previousLines, cleanedLine].join('\n');
+                                            multilineRef.current.setValue(newValue);
+                                            onChange(newValue);
+                                        }
+                                        else {
+                                            multilineRef.current.setValue(cleanedLine);
+                                            onChange(cleanedLine);
+                                        }
+                                    }
+                                    return;
+                                }
                                 // Update only the current line, preserve previous lines
                                 if (isMultiline) {
                                     const newValue = [...previousLines, newCurrentLine].join('\n');
@@ -663,42 +776,50 @@ const InteractiveApp = ({ userId, verbose: initialVerbose }) => {
         return 'compact';
     }, [terminalWidth]);
     // Layout configuration based on terminal size
+    // Use calculated pixel widths instead of percentages to prevent truncation
     const layoutConfig = useMemo(() => {
+        const minPanelWidth = 40; // Minimum width to show full labels like "Unconscious (We)"
         switch (layoutSize) {
             case 'ultra-wide':
+                // 3 panels - divide terminal width by 3, ensure minimum
+                const thirdWidth = Math.max(minPanelWidth, Math.floor(terminalWidth / 3) - 2);
                 return {
-                    panelWidth: '33%',
+                    panelWidth: thirdWidth,
                     showThirdPanel: true,
                     logMaxLines: Math.max(8, terminalHeight - 14),
                     expandPanels: true,
                     horizontalPadding: 2,
                 };
             case 'wide':
+                // 2 panels - divide terminal width by 2
+                const halfWidthWide = Math.max(minPanelWidth, Math.floor(terminalWidth / 2) - 2);
                 return {
-                    panelWidth: '50%',
+                    panelWidth: halfWidthWide,
                     showThirdPanel: false,
                     logMaxLines: Math.max(6, terminalHeight - 16),
                     expandPanels: true,
                     horizontalPadding: 1,
                 };
             case 'medium':
+                // 2 panels in medium mode
+                const halfWidthMedium = Math.max(minPanelWidth, Math.floor(terminalWidth / 2) - 1);
                 return {
-                    panelWidth: '50%',
+                    panelWidth: halfWidthMedium,
                     showThirdPanel: false,
                     logMaxLines: Math.max(5, terminalHeight - 18),
                     expandPanels: false,
                     horizontalPadding: 1,
                 };
-            default: // compact
+            default: // compact - stack panels vertically
                 return {
-                    panelWidth: '100%',
+                    panelWidth: terminalWidth - 2,
                     showThirdPanel: false,
                     logMaxLines: Math.max(4, terminalHeight - 20),
                     expandPanels: false,
                     horizontalPadding: 0,
                 };
         }
-    }, [layoutSize, terminalHeight]);
+    }, [layoutSize, terminalHeight, terminalWidth]);
     const logMaxLines = layoutConfig.logMaxLines;
     // Add log entry
     const log = useCallback((level, source, message) => {
@@ -1286,6 +1407,122 @@ const InteractiveApp = ({ userId, verbose: initialVerbose }) => {
                     log('info', 'system', 'Shortcuts: /c, /s, /sp, /d');
                 }
                 return true;
+            case 'model':
+                const modelSubcmd = args[0]?.toLowerCase();
+                const currentModelConfig = getConsciousMindConfig();
+                const currentModelId = currentModelConfig.model;
+                const modelInfo = getModelShortInfo(currentModelId);
+                const modelPos = getModelPosition(currentModelId);
+                if (!modelSubcmd || modelSubcmd === 'info') {
+                    // Show current model info
+                    log('info', 'system', '═══ CONSCIOUS MIND MODEL ═══');
+                    log('info', 'system', `Current: ${currentModelId}`);
+                    log('info', 'system', `  Tier: ${modelInfo.tier} (${modelInfo.score})`);
+                    log('info', 'system', `  Position: ${modelPos.current}/${modelPos.total} in recommended list`);
+                    log('info', 'system', '');
+                    log('info', 'system', 'Controls:');
+                    log('info', 'system', '  /model list       - Show all ranked models');
+                    log('info', 'system', '  /model set <id>   - Set model by ID');
+                    log('info', 'system', '  /model next       - Cycle to next model (Ctrl+])');
+                    log('info', 'system', '  /model prev       - Cycle to previous model (Ctrl+[)');
+                }
+                else if (modelSubcmd === 'list') {
+                    // Show all recommended models grouped by tier
+                    log('info', 'system', '═══ RECOMMENDED MODELS (Ranked by Experiment Scores) ═══');
+                    log('info', 'system', '');
+                    // Group models by tier for display
+                    const topTier = RECOMMENDED_CONSCIOUS_MODELS.slice(0, 10);
+                    const highTier = RECOMMENDED_CONSCIOUS_MODELS.slice(10, 20);
+                    const goodTier = RECOMMENDED_CONSCIOUS_MODELS.slice(20);
+                    log('info', 'system', '▸ TOP TIER (94-100% scores):');
+                    for (const m of topTier) {
+                        const isCurrent = m === currentModelId ? ' ◀ CURRENT' : '';
+                        const isFree = m.includes(':free') ? ' [FREE]' : '';
+                        log('info', 'system', `    ${m}${isFree}${isCurrent}`);
+                    }
+                    log('info', 'system', '');
+                    log('info', 'system', '▸ HIGH TIER (89% scores):');
+                    for (const m of highTier) {
+                        const isCurrent = m === currentModelId ? ' ◀ CURRENT' : '';
+                        const isFree = m.includes(':free') ? ' [FREE]' : '';
+                        log('info', 'system', `    ${m}${isFree}${isCurrent}`);
+                    }
+                    log('info', 'system', '');
+                    log('info', 'system', '▸ GOOD TIER (83% scores):');
+                    for (const m of goodTier) {
+                        const isCurrent = m === currentModelId ? ' ◀ CURRENT' : '';
+                        const isFree = m.includes(':free') ? ' [FREE]' : '';
+                        log('info', 'system', `    ${m}${isFree}${isCurrent}`);
+                    }
+                    log('info', 'system', '');
+                    log('info', 'system', 'Usage: /model set <model_id>');
+                }
+                else if (modelSubcmd === 'set') {
+                    const newModelId = args[1];
+                    if (!newModelId) {
+                        log('error', 'system', 'Usage: /model set <model_id>');
+                        log('info', 'system', 'Run /model list to see available models');
+                    }
+                    else {
+                        try {
+                            await setConsciousMindModel(newModelId);
+                            const newInfo = getModelShortInfo(newModelId);
+                            log('info', 'system', `✓ Model changed to: ${newModelId}`);
+                            log('info', 'system', `  Tier: ${newInfo.tier} (${newInfo.score})`);
+                            // Update the system status to reflect new model
+                            setSystemStatus((prev) => ({
+                                ...prev,
+                                iLayer: { ...prev.iLayer, model: newModelId },
+                            }));
+                        }
+                        catch (error) {
+                            log('error', 'system', `Failed to set model: ${error instanceof Error ? error.message : 'Unknown error'}`);
+                        }
+                    }
+                }
+                else if (modelSubcmd === 'next') {
+                    const nextModel = getNextRecommendedModel(currentModelId);
+                    try {
+                        await setConsciousMindModel(nextModel);
+                        const newInfo = getModelShortInfo(nextModel);
+                        const newPos = getModelPosition(nextModel);
+                        log('info', 'system', `✓ Model: ${nextModel} (${newPos.current}/${newPos.total})`);
+                        log('info', 'system', `  ${newInfo.tier} - ${newInfo.score}`);
+                        setSystemStatus((prev) => ({
+                            ...prev,
+                            iLayer: { ...prev.iLayer, model: nextModel },
+                        }));
+                    }
+                    catch (error) {
+                        log('error', 'system', `Failed to cycle model: ${error instanceof Error ? error.message : 'Unknown error'}`);
+                    }
+                }
+                else if (modelSubcmd === 'prev') {
+                    const prevModel = getPreviousRecommendedModel(currentModelId);
+                    try {
+                        await setConsciousMindModel(prevModel);
+                        const newInfo = getModelShortInfo(prevModel);
+                        const newPos = getModelPosition(prevModel);
+                        log('info', 'system', `✓ Model: ${prevModel} (${newPos.current}/${newPos.total})`);
+                        log('info', 'system', `  ${newInfo.tier} - ${newInfo.score}`);
+                        setSystemStatus((prev) => ({
+                            ...prev,
+                            iLayer: { ...prev.iLayer, model: prevModel },
+                        }));
+                    }
+                    catch (error) {
+                        log('error', 'system', `Failed to cycle model: ${error instanceof Error ? error.message : 'Unknown error'}`);
+                    }
+                }
+                else {
+                    log('info', 'system', 'Usage: /model [list|set <model_id>|info|next|prev]');
+                    log('info', 'system', '  info    - Show current model details');
+                    log('info', 'system', '  list    - Show all ranked models by tier');
+                    log('info', 'system', '  set     - Change to a specific model');
+                    log('info', 'system', '  next    - Cycle to next ranked model');
+                    log('info', 'system', '  prev    - Cycle to previous ranked model');
+                }
+                return true;
             case 'onboarding':
                 const onboardingSubcmd = args[0]?.toLowerCase();
                 if (!onboardingSubcmd || onboardingSubcmd === 'status') {
@@ -1525,7 +1762,12 @@ const InteractiveApp = ({ userId, verbose: initialVerbose }) => {
                                         depth: event.data.depth,
                                     },
                                 }));
-                                log('layer', 'we-layer', `Sensed: ${event.data.emotion} · Intent: ${event.data.intent} · Memories: ${event.data.memories}`);
+                                // Log context data as separate readable items
+                                log('layer', 'we-layer', `Sensed: ${event.data.emotion}`);
+                                log('layer', 'we-layer', `Intent: ${event.data.intent}`);
+                                if (event.data.memories) {
+                                    log('layer', 'we-layer', `Memories: ${event.data.memories}`);
+                                }
                                 break;
                             case 'token':
                                 // Streaming token - update response in real-time
@@ -1709,6 +1951,8 @@ const InteractiveApp = ({ userId, verbose: initialVerbose }) => {
         const trimmed = value.trim();
         if (!trimmed)
             return;
+        // Decode any image tokens back to @path format before sending
+        const decodedValue = hasImageTokens(trimmed) ? decodeImageTokens(trimmed) : trimmed;
         // Add to history (for both commands and messages)
         historyRef.current.add(trimmed);
         // Handle commands immediately even during processing
@@ -1723,7 +1967,7 @@ const InteractiveApp = ({ userId, verbose: initialVerbose }) => {
         if (processing) {
             setMessageQueue((prev) => [
                 ...prev,
-                { id: generateLogId(), text: trimmed, queuedAt: new Date() },
+                { id: generateLogId(), text: decodedValue, queuedAt: new Date() },
             ]);
             log('info', 'system', `Queued: "${trimmed.slice(0, 30)}${trimmed.length > 30 ? '...' : ''}"`);
             setInputValue('');
@@ -1735,7 +1979,7 @@ const InteractiveApp = ({ userId, verbose: initialVerbose }) => {
         const controller = new AbortController();
         setAbortController(controller);
         try {
-            await processMessage(trimmed, controller);
+            await processMessage(decodedValue, controller);
             // Back to idle after short delay
             setTimeout(() => {
                 setBeingState((prev) => ({
@@ -1799,8 +2043,8 @@ const InteractiveApp = ({ userId, verbose: initialVerbose }) => {
         if (key.tab) {
             cycleViewMode();
         }
-        // ? to toggle keyboard shortcuts help
-        if (input === '?') {
+        // ? to toggle keyboard shortcuts help (only when not typing)
+        if (input === '?' && !inputValue) {
             setShowShortcuts((prev) => !prev);
         }
         // Code block actions (only when not typing in input)
@@ -1820,6 +2064,24 @@ const InteractiveApp = ({ userId, verbose: initialVerbose }) => {
         }
         if (key.downArrow && hasCodeBlocks && !processing) {
             navigateCodeBlock('down');
+        }
+        // Ctrl+] to cycle to next recommended model
+        if (key.ctrl && input === ']') {
+            const currentModel = getConsciousMindConfig().model;
+            const nextModel = getNextRecommendedModel(currentModel);
+            setConsciousMindModel(nextModel);
+            const info = getModelShortInfo(nextModel);
+            const pos = getModelPosition(nextModel);
+            log('info', 'system', `Model: ${info.name} [${info.tier}] ${info.score} (${pos.current}/${pos.total}) [Ctrl+[ / Ctrl+] to cycle]`);
+        }
+        // Ctrl+[ to cycle to previous recommended model
+        if (key.ctrl && input === '[') {
+            const currentModel = getConsciousMindConfig().model;
+            const prevModel = getPreviousRecommendedModel(currentModel);
+            setConsciousMindModel(prevModel);
+            const info = getModelShortInfo(prevModel);
+            const pos = getModelPosition(prevModel);
+            log('info', 'system', `Model: ${info.name} [${info.tier}] ${info.score} (${pos.current}/${pos.total}) [Ctrl+[ / Ctrl+] to cycle]`);
         }
     });
     if (!initialized) {
@@ -1855,30 +2117,44 @@ const InteractiveApp = ({ userId, verbose: initialVerbose }) => {
     }
     // Companion View - Clean conversation only
     if (viewMode === 'companion') {
-        return (_jsxs(Box, { flexDirection: "column", height: terminalHeight - 1, children: [_jsxs(Box, { paddingX: 1, marginBottom: 0, children: [_jsx(Text, { bold: true, color: C.purple, children: "\u2727 ZOSIA" }), _jsx(Text, { color: C.gray, children: " \u00B7 " }), _jsx(Text, { color: beingState.phase === 'idle' ? C.gray : C.yellow, children: beingState.phase === 'idle' ? 'listening' : beingState.phase }), _jsx(Box, { flexGrow: 1 }), _jsx(Text, { dimColor: true, children: "[Tab for more]" })] }), _jsx(Box, { flexGrow: 1, marginTop: 0, children: _jsx(MindActivity, { logs: getVisibleLogs(), maxLines: getLogMaxLines(), streamingLogId: streamingLogId, selectedCodeBlock: selectedCodeBlock, expandedCodeBlocks: expandedCodeBlocks, onCodeBlockCopy: handleCodeBlockCopy, onToggleExpand: toggleCodeBlockExpand }) }), _jsx(InputArea, { value: inputValue, onChange: setInputValue, onSubmit: handleSubmit, processing: processing, queueCount: messageQueue.length, onCancel: cancelProcessing, onHistoryPrev: () => historyRef.current.previous(), onHistoryNext: () => historyRef.current.next() })] }));
+        return (_jsxs(Box, { flexDirection: "column", height: terminalHeight - 1, children: [_jsxs(Box, { paddingX: 1, marginBottom: 0, children: [_jsx(Text, { bold: true, color: C.purple, children: "\u2727 ZOSIA" }), _jsx(Text, { color: C.gray, children: " \u00B7 " }), _jsx(Text, { color: beingState.phase === 'idle' ? C.gray : C.yellow, children: beingState.phase === 'idle' ? 'listening' : beingState.phase }), _jsx(Box, { flexGrow: 1 }), _jsx(Text, { dimColor: true, children: "[Tab for more]" })] }), _jsx(Box, { flexGrow: 1, marginTop: 0, overflow: "hidden", children: _jsx(MindActivity, { logs: getVisibleLogs(), maxLines: getLogMaxLines(), streamingLogId: streamingLogId, selectedCodeBlock: selectedCodeBlock, expandedCodeBlocks: expandedCodeBlocks, onCodeBlockCopy: handleCodeBlockCopy, onToggleExpand: toggleCodeBlockExpand }) }), _jsx(Box, { flexShrink: 0, minHeight: 3, children: _jsx(InputArea, { value: inputValue, onChange: setInputValue, onSubmit: handleSubmit, processing: processing, queueCount: messageQueue.length, onCancel: cancelProcessing, onHistoryPrev: () => historyRef.current.previous(), onHistoryNext: () => historyRef.current.next() }) })] }));
     }
     // Summary View - Conversation + status bar
     if (viewMode === 'summary') {
-        return (_jsxs(Box, { flexDirection: "column", height: terminalHeight - 1, children: [_jsx(Header, { verbose: verbose, memoryActive: systemStatus.memory.connected, phase: beingState.phase, tokenStats: tokenStats, viewMode: viewMode, otherSessions: otherSessions }), beingState.phase !== 'idle' && (_jsxs(Box, { paddingX: 1, marginBottom: 0, children: [_jsx(Text, { color: C.blue, children: "\uD83D\uDCAD " }), _jsxs(Text, { color: C.gray, children: [beingState.unconscious.active && `Sensing: ${beingState.unconscious.sensing || '...'} · `, beingState.conscious.active && `Thinking: ${beingState.conscious.thinking || '...'}`, beingState.phase === 'integrating' && 'Integrating context...', beingState.phase === 'remembering' && 'Saving to memory...'] })] })), _jsx(Box, { flexGrow: 1, marginTop: 0, children: _jsx(MindActivity, { logs: logs, maxLines: getLogMaxLines(), streamingLogId: streamingLogId, selectedCodeBlock: selectedCodeBlock, expandedCodeBlocks: expandedCodeBlocks, onCodeBlockCopy: handleCodeBlockCopy, onToggleExpand: toggleCodeBlockExpand }) }), _jsx(InputArea, { value: inputValue, onChange: setInputValue, onSubmit: handleSubmit, processing: processing, queueCount: messageQueue.length, onCancel: cancelProcessing, onHistoryPrev: () => historyRef.current.previous(), onHistoryNext: () => historyRef.current.next() })] }));
+        return (_jsxs(Box, { flexDirection: "column", height: terminalHeight - 1, children: [_jsx(Header, { verbose: verbose, memoryActive: systemStatus.memory.connected, phase: beingState.phase, tokenStats: tokenStats, viewMode: viewMode, otherSessions: otherSessions, terminalWidth: terminalWidth }), beingState.phase !== 'idle' && (_jsxs(Box, { paddingX: 1, marginBottom: 0, children: [_jsx(Text, { color: C.blue, children: "\uD83D\uDCAD " }), _jsxs(Text, { color: C.gray, children: [beingState.unconscious.active && `Sensing: ${beingState.unconscious.sensing || '...'} · `, beingState.conscious.active && `Thinking: ${beingState.conscious.thinking || '...'}`, beingState.phase === 'integrating' && 'Integrating context...', beingState.phase === 'remembering' && 'Saving to memory...'] })] })), _jsx(Box, { flexGrow: 1, marginTop: 0, overflow: "hidden", children: _jsx(MindActivity, { logs: logs, maxLines: getLogMaxLines(), streamingLogId: streamingLogId, selectedCodeBlock: selectedCodeBlock, expandedCodeBlocks: expandedCodeBlocks, onCodeBlockCopy: handleCodeBlockCopy, onToggleExpand: toggleCodeBlockExpand }) }), _jsx(Box, { flexShrink: 0, minHeight: 3, children: _jsx(InputArea, { value: inputValue, onChange: setInputValue, onSubmit: handleSubmit, processing: processing, queueCount: messageQueue.length, onCancel: cancelProcessing, onHistoryPrev: () => historyRef.current.previous(), onHistoryNext: () => historyRef.current.next() }) })] }));
     }
-    // Split View - Side-by-side conversation | mind activity
+    // Split View - Side-by-side: Conscious (I) | Unconscious (We)
     if (viewMode === 'split') {
-        // Filter logs into conversation (user/response) and mind (everything else)
-        const conversationLogs = logs.filter((entry) => entry.level === 'user' || entry.level === 'response');
-        const mindLogs = logs.filter((entry) => entry.level !== 'user' && entry.level !== 'response');
-        return (_jsxs(Box, { flexDirection: "column", height: terminalHeight - 1, children: [_jsx(Header, { verbose: verbose, memoryActive: systemStatus.memory.connected, phase: beingState.phase, tokenStats: tokenStats, viewMode: viewMode, otherSessions: otherSessions }), _jsxs(Box, { flexGrow: 1, marginTop: 0, flexDirection: layoutSize === 'compact' ? 'column' : 'row', children: [_jsxs(Box, { width: layoutSize === 'compact' ? '100%' : '50%', flexDirection: "column", borderStyle: "single", borderColor: C.purple, paddingX: 1, children: [_jsx(Text, { bold: true, color: C.purple, children: "\u2500 Conversation \u2500" }), _jsx(Box, { flexDirection: "column", minHeight: getLogMaxLines(), children: conversationLogs.length === 0 ? (_jsx(Text, { dimColor: true, italic: true, children: "Conversation will appear here..." })) : (conversationLogs.slice(-getLogMaxLines()).map((entry) => {
+        // Filter logs by consciousness layer for meaningful split
+        // Left: I-LAYER (Conscious) - user input, responses, and I-layer thinking
+        const consciousLogs = logs.filter((entry) => entry.level === 'user' ||
+            entry.level === 'response' ||
+            entry.source === 'i-layer' ||
+            entry.source === 'zosia');
+        // Right: WE-LAYER (Unconscious) - we-layer processing, memory, system
+        const unconsciousLogs = logs.filter((entry) => entry.source === 'we-layer' ||
+            entry.source === 'memory' ||
+            entry.source === 'system');
+        return (_jsxs(Box, { flexDirection: "column", height: terminalHeight - 1, children: [_jsx(Header, { verbose: verbose, memoryActive: systemStatus.memory.connected, phase: beingState.phase, tokenStats: tokenStats, viewMode: viewMode, otherSessions: otherSessions, terminalWidth: terminalWidth }), _jsxs(Box, { flexGrow: 1, marginTop: 0, flexDirection: layoutSize === 'compact' ? 'column' : 'row', overflow: "hidden", children: [_jsxs(Box, { width: layoutSize === 'compact' ? '100%' : '50%', flexDirection: "column", borderStyle: "single", borderColor: C.green, paddingX: 1, overflow: "hidden", children: [_jsx(Text, { bold: true, color: C.green, children: "\u2500 I-LAYER (Conscious) \u2500" }), _jsx(Box, { flexDirection: "column", minHeight: getLogMaxLines(), overflow: "hidden", children: consciousLogs.length === 0 ? (_jsx(Text, { dimColor: true, italic: true, children: "Conscious thinking will appear here..." })) : (consciousLogs.slice(-getLogMaxLines()).map((entry) => {
                                         const timeStr = entry.timestamp.toLocaleTimeString('en-US', {
                                             hour12: false,
                                             hour: '2-digit',
                                             minute: '2-digit',
                                             second: '2-digit',
                                         });
+                                        // Color by type
+                                        let labelColor = C.green;
+                                        let labelText = 'I-LAYER';
                                         if (entry.level === 'user') {
-                                            return (_jsxs(Box, { flexDirection: "column", children: [_jsxs(Box, { children: [_jsxs(Text, { dimColor: true, children: [timeStr, " "] }), _jsx(Text, { color: C.cyan, children: "\u25C0 You: " })] }), _jsx(Box, { marginLeft: 2, children: _jsx(Text, { wrap: "wrap", children: entry.message }) })] }, entry.id));
+                                            labelColor = C.cyan;
+                                            labelText = '◀ YOU';
                                         }
-                                        // Response - show with wrapping
-                                        return (_jsxs(Box, { flexDirection: "column", children: [_jsxs(Box, { children: [_jsxs(Text, { dimColor: true, children: [timeStr, " "] }), _jsx(Text, { color: C.purple, children: "\u25BA Zosia:" })] }), _jsx(Box, { marginLeft: 2, children: _jsx(Text, { wrap: "wrap", children: entry.message }) })] }, entry.id));
-                                    })) })] }), _jsxs(Box, { width: layoutSize === 'compact' ? '100%' : '50%', flexDirection: "column", borderStyle: "single", borderColor: C.blue, paddingX: 1, children: [_jsx(Text, { bold: true, color: C.blue, children: "\u2500 Mind Activity \u2500" }), _jsx(Box, { flexDirection: "column", minHeight: getLogMaxLines(), children: mindLogs.length === 0 ? (_jsx(Text, { dimColor: true, italic: true, children: "Mind activity will appear here..." })) : (mindLogs.slice(-getLogMaxLines()).map((entry) => {
+                                        else if (entry.level === 'response' || entry.source === 'zosia') {
+                                            labelColor = C.purple;
+                                            labelText = '► ZOSIA';
+                                        }
+                                        return (_jsx(Box, { flexDirection: "column", children: _jsxs(Box, { children: [_jsxs(Text, { dimColor: true, children: [timeStr, " "] }), _jsxs(Text, { color: labelColor, children: ["[", labelText, "] "] }), _jsx(Text, { wrap: "wrap", children: entry.message })] }) }, entry.id));
+                                    })) })] }), _jsxs(Box, { width: layoutSize === 'compact' ? '100%' : '50%', flexDirection: "column", borderStyle: "single", borderColor: C.blue, paddingX: 1, overflow: "hidden", children: [_jsx(Text, { bold: true, color: C.blue, children: "\u2500 WE-LAYER (Unconscious) \u2500" }), _jsx(Box, { flexDirection: "column", minHeight: getLogMaxLines(), overflow: "hidden", children: unconsciousLogs.length === 0 ? (_jsx(Text, { dimColor: true, italic: true, children: "Unconscious processing will appear here..." })) : (unconsciousLogs.slice(-getLogMaxLines()).map((entry) => {
                                         const timeStr = entry.timestamp.toLocaleTimeString('en-US', {
                                             hour12: false,
                                             hour: '2-digit',
@@ -1890,13 +2166,25 @@ const InteractiveApp = ({ userId, verbose: initialVerbose }) => {
                                             'we-layer': C.blue,
                                             'i-layer': C.green,
                                             memory: C.orange,
+                                            user: C.cyan,
+                                            zosia: C.purple,
+                                        };
+                                        // Map source to clear, readable labels - NO truncation
+                                        const sourceLabels = {
+                                            system: 'SYSTEM',
+                                            'we-layer': 'WE-LAYER',
+                                            'i-layer': 'I-LAYER',
+                                            memory: 'MEMORY',
+                                            user: 'USER',
+                                            zosia: 'ZOSIA',
                                         };
                                         const color = sourceColors[entry.source] || C.gray;
-                                        return (_jsxs(Box, { flexDirection: "column", children: [_jsxs(Box, { children: [_jsxs(Text, { dimColor: true, children: [timeStr, " "] }), _jsxs(Text, { color: color, children: ["[", entry.source.toUpperCase().slice(0, 6), "] "] })] }), _jsx(Box, { marginLeft: 2, children: _jsx(Text, { wrap: "wrap", children: entry.message }) })] }, entry.id));
-                                    })) })] })] }), _jsx(InputArea, { value: inputValue, onChange: setInputValue, onSubmit: handleSubmit, processing: processing, queueCount: messageQueue.length, onCancel: cancelProcessing, onHistoryPrev: () => historyRef.current.previous(), onHistoryNext: () => historyRef.current.next() })] }));
+                                        const label = sourceLabels[entry.source] || entry.source.toUpperCase();
+                                        return (_jsx(Box, { flexDirection: "column", children: _jsxs(Box, { children: [_jsxs(Text, { dimColor: true, children: [timeStr, " "] }), _jsxs(Text, { color: color, children: ["[", label, "] "] }), _jsx(Text, { wrap: "wrap", children: entry.message })] }) }, entry.id));
+                                    })) })] })] }), _jsx(Box, { flexShrink: 0, minHeight: 3, children: _jsx(InputArea, { value: inputValue, onChange: setInputValue, onSubmit: handleSubmit, processing: processing, queueCount: messageQueue.length, onCancel: cancelProcessing, onHistoryPrev: () => historyRef.current.previous(), onHistoryNext: () => historyRef.current.next() }) })] }));
     }
     // Developer View - Full debug with all panels
-    return (_jsxs(Box, { flexDirection: "column", height: terminalHeight - 1, children: [_jsx(Header, { verbose: verbose, memoryActive: systemStatus.memory.connected, phase: beingState.phase, tokenStats: tokenStats, viewMode: viewMode, otherSessions: otherSessions }), _jsxs(Box, { marginTop: 0, children: [_jsx(Box, { width: layoutConfig.panelWidth, children: _jsx(InternalStatePanel, { being: beingState, status: systemStatus }) }), _jsx(Box, { width: layoutConfig.panelWidth, children: _jsx(NeuralFlowPanel, { phase: beingState.phase, status: systemStatus }) }), layoutConfig.showThirdPanel && (_jsx(Box, { width: layoutConfig.panelWidth, children: _jsx(SessionStatsPanel, { tokenStats: tokenStats, logs: logs, status: systemStatus }) }))] }), _jsx(Box, { flexGrow: 1, marginTop: 0, children: _jsx(MindActivity, { logs: logs, maxLines: getLogMaxLines(), streamingLogId: streamingLogId, selectedCodeBlock: selectedCodeBlock, expandedCodeBlocks: expandedCodeBlocks, onCodeBlockCopy: handleCodeBlockCopy, onToggleExpand: toggleCodeBlockExpand }) }), _jsx(InputArea, { value: inputValue, onChange: setInputValue, onSubmit: handleSubmit, processing: processing, queueCount: messageQueue.length, onCancel: cancelProcessing, onHistoryPrev: () => historyRef.current.previous(), onHistoryNext: () => historyRef.current.next() })] }));
+    return (_jsxs(Box, { flexDirection: "column", height: terminalHeight - 1, children: [_jsx(Header, { verbose: verbose, memoryActive: systemStatus.memory.connected, phase: beingState.phase, tokenStats: tokenStats, viewMode: viewMode, otherSessions: otherSessions }), _jsxs(Box, { marginTop: 0, children: [_jsx(Box, { width: layoutConfig.panelWidth, children: _jsx(InternalStatePanel, { being: beingState, status: systemStatus }) }), _jsx(Box, { width: layoutConfig.panelWidth, children: _jsx(NeuralFlowPanel, { phase: beingState.phase, status: systemStatus }) }), layoutConfig.showThirdPanel && (_jsx(Box, { width: layoutConfig.panelWidth, children: _jsx(SessionStatsPanel, { tokenStats: tokenStats, logs: logs, status: systemStatus }) }))] }), _jsx(Box, { flexGrow: 1, marginTop: 0, overflow: "hidden", children: _jsx(MindActivity, { logs: logs, maxLines: getLogMaxLines(), streamingLogId: streamingLogId, selectedCodeBlock: selectedCodeBlock, expandedCodeBlocks: expandedCodeBlocks, onCodeBlockCopy: handleCodeBlockCopy, onToggleExpand: toggleCodeBlockExpand }) }), _jsx(Box, { flexShrink: 0, minHeight: 3, children: _jsx(InputArea, { value: inputValue, onChange: setInputValue, onSubmit: handleSubmit, processing: processing, queueCount: messageQueue.length, onCancel: cancelProcessing, onHistoryPrev: () => historyRef.current.previous(), onHistoryNext: () => historyRef.current.next() }) })] }));
 };
 // ─────────────────────────────────────────────────────────────────────────────
 // Launch

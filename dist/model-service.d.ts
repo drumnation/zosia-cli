@@ -41,7 +41,7 @@ export interface ModelCache {
     };
 }
 export declare const KNOWN_EMBEDDING_MODELS: OpenAIEmbeddingModel[];
-export declare const DEFAULT_CONSCIOUS_MODEL = "google/gemma-2-9b-it";
+export declare const DEFAULT_CONSCIOUS_MODEL = "anthropic/claude-haiku-4.5";
 export declare const RECOMMENDED_CONSCIOUS_MODELS: string[];
 /**
  * Fetch models from OpenRouter API
@@ -81,4 +81,27 @@ export declare function estimateTurnCost(model: OpenRouterModel, inputTokens: nu
  * Estimate embedding cost
  */
 export declare function estimateEmbeddingCost(provider: 'jina' | 'openai', tokens: number, model?: string): number;
+/**
+ * Get the next model in the recommended list (cycle forward)
+ */
+export declare function getNextRecommendedModel(currentModel: string): string;
+/**
+ * Get the previous model in the recommended list (cycle backward)
+ */
+export declare function getPreviousRecommendedModel(currentModel: string): string;
+/**
+ * Get model info for display (short format)
+ */
+export declare function getModelShortInfo(modelId: string): {
+    name: string;
+    tier: string;
+    score: string;
+};
+/**
+ * Get current model index in recommended list (1-indexed for display)
+ */
+export declare function getModelPosition(modelId: string): {
+    current: number;
+    total: number;
+};
 //# sourceMappingURL=model-service.d.ts.map

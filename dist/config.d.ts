@@ -49,6 +49,10 @@ export interface ConsciousMindConfig {
     temperature: number;
     maxTokens: number;
 }
+export interface MindSkillsConfig {
+    enabled: string[];
+    disabled: string[];
+}
 export interface CustomPrompts {
     conscious?: string;
     subconscious?: string;
@@ -71,6 +75,7 @@ export interface ConfigData {
     openrouterKeyValidatedAt?: string;
     consciousMind: ConsciousMindConfig;
     customPrompts?: CustomPrompts;
+    mindSkills?: MindSkillsConfig;
     costTracking: CostTracking;
     modelCache?: ModelCache;
     handoffSettings?: HandoffSettings;
@@ -95,6 +100,14 @@ export declare function getCustomPrompts(): CustomPrompts | undefined;
 export declare function setCustomPrompt(type: 'conscious' | 'subconscious' | 'identityKernel', prompt: string): Promise<void>;
 export declare function clearCustomPrompt(type: 'conscious' | 'subconscious' | 'identityKernel'): Promise<void>;
 export declare function clearAllCustomPrompts(): Promise<void>;
+export declare function getMindSkillsConfig(): MindSkillsConfig;
+export declare function enableMindSkill(skillId: string): Promise<void>;
+export declare function disableMindSkill(skillId: string): Promise<void>;
+export declare function resetMindSkills(): Promise<void>;
+export declare const getSkillsConfig: typeof getMindSkillsConfig;
+export declare const enableSkill: typeof enableMindSkill;
+export declare const disableSkill: typeof disableMindSkill;
+export declare const resetSkills: typeof resetMindSkills;
 export declare function getHandoffSettings(): HandoffSettings;
 export declare function setHandoffPrompt(prompt: string): Promise<void>;
 export declare function clearHandoffPrompt(): Promise<void>;

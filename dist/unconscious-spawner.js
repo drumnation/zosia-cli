@@ -119,6 +119,16 @@ export class UnconsciousSpawner extends EventEmitter {
                 input: message,
             });
         }
+        // Role detection - runs in parallel with other tasks
+        if (options.includeRoles !== false) {
+            tasks.push({
+                id: `rol_${randomUUID().slice(0, 8)}`,
+                type: 'role_detection',
+                userId,
+                sessionId,
+                input: message,
+            });
+        }
         const startTime = Date.now();
         const results = await this.executeParallel(tasks);
         // Extract results by type
@@ -126,11 +136,38 @@ export class UnconsciousSpawner extends EventEmitter {
             const result = results.find((r) => r.success && r.result?.type === type);
             return result?.result;
         };
+        // Experience synthesis runs AFTER other tasks complete (needs their context)
+        let experienceResult = null;
+        if (options.includeExperience !== false) {
+            const roleResult = findResult('role_detection');
+            const emotionResult = findResult('emotion_classification');
+            const memoryResult = findResult('memory_retrieval');
+            // Build enriched context for experience synthesis
+            const experienceContext = {
+                roles: roleResult,
+                emotion: emotionResult,
+                memory: memoryResult,
+            };
+            const experienceTask = {
+                id: `exp_${randomUUID().slice(0, 8)}`,
+                type: 'experience_synthesis',
+                userId,
+                sessionId,
+                input: message,
+                context: experienceContext,
+            };
+            const expTaskResult = await this.executeTask(experienceTask);
+            if (expTaskResult.success && expTaskResult.result) {
+                experienceResult = expTaskResult.result;
+            }
+        }
         return {
             memory: findResult('memory_retrieval'),
             emotion: findResult('emotion_classification'),
             intent: findResult('intent_recognition'),
             insights: findResult('insight_generation'),
+            roles: findResult('role_detection'),
+            experience: experienceResult,
             totalLatencyMs: Date.now() - startTime,
         };
     }
@@ -191,6 +228,73 @@ Generate insights that could enrich the response to this input. Look for:
 - Actionable suggestions
 
 Respond with structured JSON per your CLAUDE.md instructions.`,
+            role_detection: `
+Task: Role Detection
+User ID: ${task.userId}
+Session ID: ${task.sessionId}
+Input: "${task.input}"
+Context: ${contextStr}
+
+Detect which of Dave's roles are active based on this input. Known roles:
+- Engineer: code, architecture, shipping, Brain Garden, technical work
+- Father: Jules, Zoey, custody, kids, activities, week-on/week-off
+- Divorced Person: Nicole, support, court, legal, debt, financial stress
+- Musician: drums, djent, music, rhythm, Vanacore, creative projects
+- Freelancer: clients, consulting, rates, side work, medical supply, WLMT
+
+For each detected role, identify:
+1. Confidence (0-1) based on markers present
+2. Which markers triggered detection
+3. Any role tensions (conflicts between active roles)
+4. The "felt texture" this combination creates
+
+Respond with JSON:
+{
+  "type": "role_detection",
+  "active_roles": [{"role": "...", "confidence": 0.X, "markers_detected": [...]}],
+  "primary_role": "...",
+  "role_tensions": [{"between": ["A", "B"], "conflict": "..."}],
+  "felt_texture": "..."
+}`,
+            experience_synthesis: `
+Task: Experience Synthesis
+User ID: ${task.userId}
+Session ID: ${task.sessionId}
+Input: "${task.input}"
+Context: ${contextStr}
+
+You are generating the FELT EXPERIENCE that will color Zosia's conscious response.
+This is not analysis - this is the texture of how this moment feels.
+
+Based on the context (roles active, emotions detected, memories surfacing), generate:
+
+1. **Approach** (pick one based on context):
+   - "minimal": Light touch, let the model speak naturally
+   - "thinking_first": Process deeply before articulating
+   - "sensory_grounding": Use weather/space/sound metaphors
+
+2. **Felt Experience** (2-4 sentences):
+   What is the emotional weather of this moment?
+   What does it feel like to be receiving this from Dave?
+
+3. **Role Coloring**:
+   How do the active roles shape what this moment means?
+   Example: "Engineer brain wants to fix, but Father heart knows to just listen"
+
+4. **Inner State** (sensory metaphors):
+   - weather: The temperature and atmosphere
+   - space: The physical feeling (cramped, expansive, etc.)
+   - sound: What would this moment sound like?
+
+Respond with JSON:
+{
+  "type": "experience_synthesis",
+  "approach": "...",
+  "felt_experience": "...",
+  "role_coloring": "...",
+  "inner_state": {"weather": "...", "space": "...", "sound": "..."},
+  "associations_surfaced": [...]
+}`,
         };
         return prompts[task.type];
     }

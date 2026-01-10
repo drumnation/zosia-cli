@@ -14,12 +14,12 @@
  * - Optional pre-warmed agent pool for <100ms acquisition
  */
 import { EventEmitter } from 'events';
-export type UnconsciousTaskType = 'memory_retrieval' | 'emotion_classification' | 'intent_recognition' | 'insight_generation';
+export type UnconsciousTaskType = 'memory_retrieval' | 'emotion_classification' | 'intent_recognition' | 'insight_generation' | 'role_detection' | 'experience_synthesis';
 export interface Association {
-    type: 'RECALL' | 'HUNCH' | 'PULL' | 'SIGN';
+    type: 'RECALL' | 'HUNCH' | 'PULL' | 'SIGN' | 'preference' | 'teaching';
     intensity: 'faint' | 'medium' | 'strong';
     text: string;
-    source: 'graphiti' | 'pattern' | 'inference';
+    source?: 'graphiti' | 'pattern' | 'inference';
 }
 export interface MemoryRetrievalResult {
     type: 'memory_retrieval';
@@ -50,7 +50,33 @@ export interface InsightGenerationResult {
     }>;
     connections: string[];
 }
-export type UnconsciousResult = MemoryRetrievalResult | EmotionClassificationResult | IntentRecognitionResult | InsightGenerationResult;
+export interface RoleDetectionResult {
+    type: 'role_detection';
+    active_roles: Array<{
+        role: string;
+        confidence: number;
+        markers_detected: string[];
+    }>;
+    primary_role: string;
+    role_tensions: Array<{
+        between: [string, string];
+        conflict: string;
+    }>;
+    felt_texture: string;
+}
+export interface ExperienceSynthesisResult {
+    type: 'experience_synthesis';
+    approach: 'minimal' | 'thinking_first' | 'sensory_grounding';
+    felt_experience: string;
+    role_coloring: string;
+    inner_state: {
+        weather: string;
+        space: string;
+        sound: string;
+    };
+    associations_surfaced: string[];
+}
+export type UnconsciousResult = MemoryRetrievalResult | EmotionClassificationResult | IntentRecognitionResult | InsightGenerationResult | RoleDetectionResult | ExperienceSynthesisResult;
 export interface UnconsciousTask {
     id: string;
     type: UnconsciousTaskType;
@@ -97,11 +123,15 @@ export declare class UnconsciousSpawner extends EventEmitter {
      */
     processSweep(userId: string, sessionId: string, message: string, options?: {
         includeInsights?: boolean;
+        includeRoles?: boolean;
+        includeExperience?: boolean;
     }): Promise<{
         memory: MemoryRetrievalResult | null;
         emotion: EmotionClassificationResult | null;
         intent: IntentRecognitionResult | null;
         insights: InsightGenerationResult | null;
+        roles: RoleDetectionResult | null;
+        experience: ExperienceSynthesisResult | null;
         totalLatencyMs: number;
     }>;
     private buildPrompt;

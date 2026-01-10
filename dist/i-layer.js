@@ -2,7 +2,7 @@
  * I-Layer: Conscious Mind via OpenRouter
  * Receives Mindstate, produces response using configured model
  */
-import { I_LAYER_PROMPT } from './prompts.js';
+import { getILayerPrompt } from './skills/index.js';
 import { getConsciousMindConfig, getOpenRouterKey, getCustomPrompts, trackLlmUsage, getCostTracking, } from './config.js';
 import { fetchOpenRouterModels } from './model-service.js';
 /** Vision-capable models that support image input */
@@ -142,9 +142,10 @@ export async function callConscious(mindstate, userMessage, options = {}) {
             console.log(`│ 🖼️ Images detected, switching to vision model: ${selectedModel}`);
         }
     }
-    // Build system prompt (use custom if set)
-    let systemPrompt = customPrompts?.conscious || I_LAYER_PROMPT;
-    systemPrompt += '\n\n' + formatMindstate(mindstate);
+    // Build system prompt with mind skills composed
+    // Custom prompts override everything, otherwise use composed prompt with mind skills
+    const basePrompt = customPrompts?.conscious || await getILayerPrompt();
+    let systemPrompt = basePrompt + '\n\n' + formatMindstate(mindstate);
     // Build messages (supports both text-only and multimodal)
     const messages = [
         { role: 'system', content: systemPrompt }
@@ -245,9 +246,10 @@ export async function* streamConscious(mindstate, userMessage, options = {}) {
     if (hasImages && !isVisionModel(selectedModel)) {
         selectedModel = DEFAULT_VISION_MODEL;
     }
-    // Build system prompt (use custom if set)
-    let systemPrompt = customPrompts?.conscious || I_LAYER_PROMPT;
-    systemPrompt += '\n\n' + formatMindstate(mindstate);
+    // Build system prompt with mind skills composed
+    // Custom prompts override everything, otherwise use composed prompt with mind skills
+    const basePrompt = customPrompts?.conscious || await getILayerPrompt();
+    let systemPrompt = basePrompt + '\n\n' + formatMindstate(mindstate);
     // Build user message (multimodal if images present)
     const userContent = hasImages
         ? buildMultimodalContent(userMessage, options.images)

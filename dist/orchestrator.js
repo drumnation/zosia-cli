@@ -8,11 +8,239 @@
  */
 import { callConscious, streamConscious } from './i-layer.js';
 import { retrieveDeeper, persistConversation } from './we-layer.js';
-import { IDENTITY_KERNEL } from './prompts.js';
+import { IDENTITY_KERNEL, ROLE_EXPERIENCE_BRIDGES } from './prompts.js';
 import { incrementSessionCount } from './config.js';
+import { calculateTemporalContext, recordSessionTimestamp, formatTemporalForMindstate } from './temporal.js';
+import { synthesizeMindState, generateExperienceBridgePrompt, } from './experience-synthesizer.js';
+import { makeDataLayerPlugin, } from './plugins/data-layer/index.js';
+import { execSync } from 'child_process';
+// ============================================================================
+// DATA LAYER SINGLETON - Real-time life context
+// ============================================================================
+let dataLayerPlugin = null;
+let dataLayerInitialized = false;
+/**
+ * Initialize the Data Layer Plugin with real credentials
+ * This connects Zosia to Oura, Spotify, Calendar, Gmail, Withings, Plaid, RescueTime
+ */
+async function initializeDataLayer(debug = false) {
+    if (dataLayerInitialized)
+        return;
+    if (debug) {
+        console.log('\n┌─ DATA LAYER: INITIALIZING ───────────────────────────┐');
+    }
+    // Load credentials from brain-creds
+    const getCredential = (name) => {
+        try {
+            return execSync(`brain-creds get ${name}`, { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+        }
+        catch {
+            return undefined;
+        }
+    };
+    const ouraToken = getCredential('oura_token');
+    const rescueTimeApiKey = getCredential('rescuetime_api_key');
+    if (debug) {
+        console.log(`│   Oura: ${ouraToken ? '✅ Real' : '🔶 Mock'}`);
+        console.log(`│   RescueTime: ${rescueTimeApiKey ? '✅ Real' : '🔶 Mock'}`);
+        console.log(`│   Spotify, Calendar, Gmail, Withings, Plaid: 🔶 Mock (OAuth)`);
+    }
+    dataLayerPlugin = makeDataLayerPlugin({
+        useMocks: false, // Try real data - falls back per-service
+        credentials: {
+            oura: ouraToken ? { accessToken: ouraToken } : undefined,
+            rescueTime: rescueTimeApiKey ? { apiKey: rescueTimeApiKey } : undefined,
+        },
+        config: {
+            debug,
+            runOnStartup: true, // Fetch real data immediately so Zosia knows sleep/health
+            sources: {
+                oura: { enabled: true, cacheTTL: 'hourly' },
+                rescueTime: { enabled: true, cacheTTL: 'hourly' },
+                spotify: { enabled: true, cacheTTL: 'hourly' },
+                calendar: { enabled: true, cacheTTL: 'hourly' },
+                gmail: { enabled: true, cacheTTL: 'hourly' },
+                withings: { enabled: true, cacheTTL: 'daily' },
+                financial: { enabled: true, cacheTTL: 'weekly' },
+            },
+        },
+    });
+    // Must call init() before start()
+    await dataLayerPlugin.init();
+    await dataLayerPlugin.start();
+    dataLayerInitialized = true;
+    if (debug) {
+        console.log('│   ✅ Data Layer initialized');
+        console.log('└────────────────────────────────────────────────────────┘');
+    }
+}
+/**
+ * Get current Data Layer context
+ */
+async function getDataLayerContext() {
+    if (!dataLayerPlugin)
+        return null;
+    try {
+        return await dataLayerPlugin.getContext();
+    }
+    catch {
+        return null;
+    }
+}
+/**
+ * Format Data Layer context for inclusion in mindstate
+ * This becomes part of the felt experience - not raw data, but lived context
+ */
+function formatDataLayerForMindstate(ctx) {
+    const parts = [];
+    // Health/Energy context (Oura)
+    if (ctx.oura) {
+        const sleepScore = ctx.oura.sleep?.score;
+        const readinessScore = ctx.oura.readiness?.score;
+        const hrv = ctx.oura.readiness?.hrv;
+        if (sleepScore !== undefined || readinessScore !== undefined) {
+            const sleepQuality = sleepScore !== undefined
+                ? sleepScore >= 80 ? 'well-rested' : sleepScore >= 60 ? 'somewhat tired' : 'exhausted'
+                : null;
+            const readiness = readinessScore !== undefined
+                ? readinessScore >= 80 ? 'energized' : readinessScore >= 60 ? 'moderate energy' : 'low energy'
+                : null;
+            if (sleepQuality && readiness) {
+                parts.push(`Body context: ${sleepQuality} (sleep ${sleepScore}/100), ${readiness} (readiness ${readinessScore}/100).`);
+            }
+            else if (sleepQuality) {
+                parts.push(`Body context: ${sleepQuality} (sleep ${sleepScore}/100).`);
+            }
+            else if (readiness) {
+                parts.push(`Body context: ${readiness} (readiness ${readinessScore}/100).`);
+            }
+            if (hrv !== undefined) {
+                const hrvContext = hrv >= 50 ? 'good stress recovery' : hrv >= 30 ? 'moderate stress' : 'elevated stress';
+                parts.push(`HRV indicates ${hrvContext} (${hrv}ms).`);
+            }
+        }
+    }
+    // Music/Mood context (Spotify)
+    if (ctx.spotify?.recentlyPlayed && ctx.spotify.recentlyPlayed.length > 0) {
+        const recent = ctx.spotify.recentlyPlayed.slice(0, 3);
+        const trackNames = recent.map((t) => t.track).join(', ');
+        parts.push(`Recently listening to: ${trackNames}.`);
+    }
+    // Schedule context (Calendar)
+    if (ctx.calendar?.today && ctx.calendar.today.length > 0) {
+        const upcomingCount = ctx.calendar.today.length;
+        const nextEvent = ctx.calendar.today[0];
+        parts.push(`Schedule: ${upcomingCount} event(s) today. Next: "${nextEvent.title}".`);
+    }
+    // Communication context (Gmail)
+    if (ctx.gmail?.unreadCount !== undefined && ctx.gmail.unreadCount > 0) {
+        const urgency = ctx.gmail.unreadCount > 20 ? 'inbox is busy' : 'some unread messages';
+        parts.push(`Email: ${urgency} (${ctx.gmail.unreadCount} unread).`);
+    }
+    // Productivity context (RescueTime)
+    if (ctx.rescueTime?.productivityScore !== undefined) {
+        const score = ctx.rescueTime.productivityScore;
+        const prodContext = score >= 80 ? 'highly focused day' : score >= 60 ? 'moderately productive' : 'distracted day';
+        parts.push(`Work context: ${prodContext} (productivity ${score}%).`);
+    }
+    // Body composition context (Withings)
+    if (ctx.withings?.latestMeasurement?.weight !== undefined) {
+        parts.push(`Body: ${ctx.withings.latestMeasurement.weight}kg recorded.`);
+    }
+    // Financial context (Plaid) - light touch
+    if (ctx.financial?.recentTransactions && ctx.financial.recentTransactions.length > 0) {
+        parts.push(`Recent financial activity noted.`);
+    }
+    if (parts.length === 0) {
+        return 'No real-time life context available.';
+    }
+    return parts.join(' ');
+}
 // Simple in-memory session state (V0)
 // Future: Graphiti persistence
 const sessions = new Map();
+/**
+ * Role markers for Dave's known roles
+ * Based on skill-jack patterns from .zosia/roles/
+ */
+const ROLE_MARKERS = {
+    Engineer: {
+        keywords: /\b(code|build|ship|architecture|monorepo|typescript|react|api|bug|deploy|brain.?garden|scala|technical|system)\b/i,
+        contexts: ['technical work', 'problem solving', 'systems thinking'],
+    },
+    Father: {
+        keywords: /\b(jules?|zoey|kids?|children|custody|week.?on|week.?off|school|activities|parenting|daughter|son)\b/i,
+        contexts: ['family time', 'parenting', 'custody schedule'],
+    },
+    'Divorced Person': {
+        keywords: /\b(nicole|divorce|support|court|legal|debt|loan|dad.?s money|\$40k|\$115k|financial|alimony)\b/i,
+        contexts: ['financial stress', 'recovery', 'legal matters'],
+    },
+    Musician: {
+        keywords: /\b(drums?|music|djent|rhythm|vanacore|creative|band|practice|play|instrument)\b/i,
+        contexts: ['creative expression', 'meditation', 'identity'],
+    },
+    Freelancer: {
+        keywords: /\b(client|consulting|freelance|contract|rate|\$\d+\/hr|engagement|side.?work|medical.?supply|wlmt|proposal)\b/i,
+        contexts: ['side income', 'time allocation', 'client management'],
+    },
+};
+/**
+ * Role tensions - known conflicts between roles
+ */
+const ROLE_TENSIONS = [
+    { roles: ['Engineer', 'Father'], conflict: 'Week-on time is precious; work deadlines compete with presence.' },
+    { roles: ['Engineer', 'Freelancer'], conflict: 'Day job depletes creative energy needed for side work.' },
+    { roles: ['Father', 'Freelancer'], conflict: 'Side work takes from available family time.' },
+    { roles: ['Freelancer', 'Divorced Person'], conflict: 'All extra income goes to debt; freelancing pays for the past, not future.' },
+    { roles: ['Musician', 'Engineer'], conflict: 'Creative self often gets pushed aside by builder demands.' },
+];
+/**
+ * Detect active roles from message content
+ */
+function detectRoles(message) {
+    const detectedRoles = [];
+    for (const [role, { keywords, contexts }] of Object.entries(ROLE_MARKERS)) {
+        const matches = message.match(keywords);
+        if (matches) {
+            detectedRoles.push({
+                role,
+                confidence: Math.min(0.9, 0.5 + matches.length * 0.15),
+                markers_detected: [...new Set(matches.map(m => m.toLowerCase()))],
+            });
+        }
+    }
+    // Sort by confidence
+    detectedRoles.sort((a, b) => b.confidence - a.confidence);
+    // Determine primary role
+    const primaryRole = detectedRoles[0]?.role || 'neutral';
+    // Find applicable tensions
+    const activeRoleNames = detectedRoles.map(r => r.role);
+    const tensions = [];
+    for (const tension of ROLE_TENSIONS) {
+        if (activeRoleNames.includes(tension.roles[0]) && activeRoleNames.includes(tension.roles[1])) {
+            tensions.push({ between: tension.roles, conflict: tension.conflict });
+        }
+    }
+    // Generate felt texture
+    let feltTexture = 'The moment is open, uncolored by specific concerns.';
+    if (detectedRoles.length > 0) {
+        const primary = detectedRoles[0];
+        if (tensions.length > 0) {
+            feltTexture = `The ${primary.role} is present, but ${tensions[0].conflict.toLowerCase()}`;
+        }
+        else {
+            feltTexture = `The ${primary.role} shapes this moment.`;
+        }
+    }
+    return {
+        type: 'role_detection',
+        active_roles: detectedRoles,
+        primary_role: primaryRole,
+        role_tensions: tensions,
+        felt_texture: feltTexture,
+    };
+}
 /**
  * Build initial Mindstate for a turn
  */
@@ -45,11 +273,22 @@ function buildMindstate(userId, message, previousTurns = [], contextBrief) {
 /**
  * Build enriched situation snapshot from context brief
  * This is the "secret sauce" that makes the smaller model appear smarter
+ *
+ * Now includes role-aware experience synthesis - the "felt texture" of the moment
  */
 function buildEnrichedSnapshot(brief, isNewConversation) {
     const parts = [];
-    // Emotional awareness
-    if (brief.detectedEmotion !== 'neutral') {
+    // EXPERIENCE BRIDGE - First and most important (role-aware felt context)
+    // This is the We-layer → I-layer bridge that colors the response
+    if (brief.experienceBridge) {
+        parts.push(brief.experienceBridge);
+    }
+    // TEMPORAL CONTEXT (only if not already in experience bridge)
+    if (brief.temporalFormatted && !brief.experienceBridge) {
+        parts.push(brief.temporalFormatted);
+    }
+    // Emotional awareness (only if not in experience bridge)
+    if (brief.detectedEmotion !== 'neutral' && !brief.experienceBridge) {
         parts.push(`The person seems ${brief.detectedEmotion}.`);
     }
     // Relationship context
@@ -69,6 +308,13 @@ function buildEnrichedSnapshot(brief, isNewConversation) {
         continuation: 'They are continuing an earlier thread.'
     };
     parts.push(intentDescriptions[brief.primaryIntent] || '');
+    // Role-specific experience bridge (psychological context)
+    if (brief.roleContext && brief.roleContext.primary_role !== 'neutral') {
+        const roleGuidance = ROLE_EXPERIENCE_BRIDGES[brief.roleContext.primary_role];
+        if (roleGuidance) {
+            parts.push(roleGuidance.trim());
+        }
+    }
     // Suggested approach
     if (brief.suggestedApproach) {
         parts.push(`Approach: ${brief.suggestedApproach}`);
@@ -85,8 +331,15 @@ function buildEnrichedSnapshot(brief, isNewConversation) {
     if (brief.toneGuidance) {
         parts.push(`Tone: ${brief.toneGuidance}`);
     }
-    return parts.filter(p => p).join(' ');
+    // DATA LAYER - Real-time life context
+    // This is the key addition: biometric/life data flows into every response
+    if (brief.dataLayerFormatted) {
+        parts.push(`Life context: ${brief.dataLayerFormatted}`);
+    }
+    return parts.filter(p => p).join('\n\n');
 }
+// Track if we've already surfaced temporal awareness this session
+const temporalSurfacedThisSession = new Map();
 /**
  * Assemble context brief using We-Layer (Claude)
  * This is the "brain" that makes the smaller model appear smarter
@@ -101,19 +354,121 @@ async function assembleContextBrief(userId, message, previousTurns, debug) {
     const weLayerResult = await retrieveDeeper(userId, message, []);
     if (debug) {
         console.log(`│   Found ${weLayerResult.associations.length} associations (${weLayerResult.latencyMs}ms)`);
-        console.log('│ Phase 2: Analyzing context...');
+        console.log('│ Phase 2: Calculating temporal context...');
     }
-    // Phase 2: Analyze the message and context
+    // Phase 2: Calculate REAL temporal context (time since last conversation)
+    const alreadySurfaced = temporalSurfacedThisSession.get(userId) ?? false;
+    let temporalContext = null;
+    let temporalFormatted = null;
+    try {
+        temporalContext = await calculateTemporalContext(userId, alreadySurfaced);
+        temporalFormatted = formatTemporalForMindstate(temporalContext);
+        // Mark temporal as surfaced if it will be shown
+        if (temporalContext.shouldSurface) {
+            temporalSurfacedThisSession.set(userId, true);
+        }
+        if (debug) {
+            console.log(`│   Gap: ${temporalContext.gap.humanReadable} (${temporalContext.gap.significance})`);
+            console.log(`│   Time: ${temporalContext.timeOfDay.period}, ${temporalContext.dayOfWeek.day}`);
+            if (temporalContext.shouldSurface) {
+                console.log(`│   Surfacing: ${temporalContext.surfaceType} - "${temporalContext.feltSuggestion}"`);
+            }
+        }
+    }
+    catch (e) {
+        if (debug) {
+            console.log(`│   ⚠️ Temporal calculation failed: ${e instanceof Error ? e.message : 'unknown'}`);
+        }
+    }
+    if (debug) {
+        console.log('│ Phase 3: Analyzing context...');
+    }
+    // Phase 3: Analyze the message and context
     const analysis = analyzeMessage(message, previousTurns);
-    // Phase 3: Extract user preferences from memories
+    // Phase 4: Extract user preferences from memories
     const userPreferences = extractUserPreferences(weLayerResult.associations);
-    // Phase 4: Build relationship context
+    // Phase 5: Build relationship context
     const relationshipHistory = buildRelationshipContext(previousTurns, weLayerResult.associations);
-    // Phase 5: Determine response approach
+    // Phase 6: Determine response approach
     const approach = determineApproach(analysis.intent, analysis.emotion, previousTurns.length);
+    // Phase 5: Role detection
+    if (debug) {
+        console.log('│ Phase 5: Detecting active roles...');
+    }
+    const roleContext = detectRoles(message);
+    if (debug && roleContext.active_roles.length > 0) {
+        console.log(`│   Primary: ${roleContext.primary_role}`);
+        console.log(`│   Active: ${roleContext.active_roles.map(r => r.role).join(', ')}`);
+        if (roleContext.role_tensions.length > 0) {
+            console.log(`│   Tensions: ${roleContext.role_tensions.length} detected`);
+        }
+    }
+    // Phase 6: Experience synthesis
+    if (debug) {
+        console.log('│ Phase 6: Synthesizing experience...');
+    }
+    // Build context layers for experience synthesis
+    const contextLayers = {
+        memory: weLayerResult.associations.length > 0 ? {
+            type: 'memory_retrieval',
+            associations: weLayerResult.associations,
+            synthesis: 'Memories surfaced from previous conversations.',
+        } : null,
+        emotion: {
+            type: 'emotion_classification',
+            primary: analysis.emotion,
+            secondary: [],
+            intensity: analysis.emotion !== 'neutral' ? 0.7 : 0.3,
+            signals: [analysis.emotionalContext],
+        },
+        intent: {
+            type: 'intent_recognition',
+            primary_intent: analysis.intent,
+            sub_intents: [],
+            confidence: 0.8,
+            needs: approach.explorableTopics,
+        },
+        roles: roleContext.active_roles.length > 0 ? roleContext : null,
+        experience: null,
+        temporal: temporalContext ? {
+            gapSinceLastSession: temporalContext.gap.hours * 3600000,
+            timeOfDay: temporalContext.timeOfDay.period,
+        } : undefined,
+    };
+    // Synthesize mind state
+    const mindStateFormatted = synthesizeMindState(contextLayers);
+    // Generate experience bridge for I-layer
+    const experienceBridge = generateExperienceBridgePrompt(mindStateFormatted);
+    if (debug) {
+        console.log(`│   Felt: ${mindStateFormatted.feltExperience.slice(0, 60)}...`);
+    }
+    // Phase 7: Data Layer - Real-time life context
+    if (debug) {
+        console.log('│ Phase 7: Fetching Data Layer context...');
+    }
+    let dataLayerContext = null;
+    let dataLayerFormatted = null;
+    try {
+        dataLayerContext = await getDataLayerContext();
+        if (dataLayerContext) {
+            dataLayerFormatted = formatDataLayerForMindstate(dataLayerContext);
+        }
+        if (debug && dataLayerContext) {
+            console.log(`│   Oura: ${dataLayerContext.oura ? `Sleep ${dataLayerContext.oura.sleep?.score ?? '?'}/100, Readiness ${dataLayerContext.oura.readiness?.score ?? '?'}/100` : 'N/A'}`);
+            console.log(`│   Spotify: ${dataLayerContext.spotify?.recentlyPlayed?.length ?? 0} tracks`);
+            console.log(`│   Calendar: ${dataLayerContext.calendar?.today?.length ?? 0} events`);
+            console.log(`│   Gmail: ${dataLayerContext.gmail?.unreadCount ?? 0} unread`);
+            console.log(`│   RescueTime: ${dataLayerContext.rescueTime?.productivityScore ?? 'N/A'}%`);
+        }
+    }
+    catch (e) {
+        if (debug) {
+            console.log(`│   ⚠️ Data Layer fetch failed: ${e instanceof Error ? e.message : 'unknown'}`);
+        }
+    }
     const processingTimeMs = Date.now() - startTime;
     if (debug) {
-        console.log(`│ Phase 3: Context assembled in ${processingTimeMs}ms`);
+        console.log(`│ Context assembled in ${processingTimeMs}ms`);
         console.log('│');
         console.log(`│ 📊 Analysis:`);
         console.log(`│   Emotion: ${analysis.emotion}`);
@@ -130,12 +485,43 @@ async function assembleContextBrief(userId, message, previousTurns, debug) {
                 console.log(`│   • [${assoc.type}] ${assoc.text.slice(0, 50)}...`);
             }
         }
+        if (roleContext.active_roles.length > 0) {
+            console.log('│');
+            console.log('│ 🎭 Role Context:');
+            console.log(`│   • Primary: ${roleContext.primary_role}`);
+            for (const role of roleContext.active_roles) {
+                console.log(`│   • ${role.role} (${(role.confidence * 100).toFixed(0)}%): ${role.markers_detected.join(', ')}`);
+            }
+            if (roleContext.role_tensions.length > 0) {
+                console.log('│   Tensions:');
+                for (const tension of roleContext.role_tensions) {
+                    console.log(`│     ${tension.between[0]} ↔ ${tension.between[1]}`);
+                }
+            }
+        }
+        if (temporalContext) {
+            console.log('│');
+            console.log('│ ⏰ Temporal Awareness:');
+            console.log(`│   • Last conversation: ${temporalContext.gap.humanReadable}`);
+            console.log(`│   • Time: ${temporalContext.timeOfDay.period} (${temporalContext.timeOfDay.hour}:00)`);
+            console.log(`│   • Day: ${temporalContext.dayOfWeek.day}${temporalContext.dayOfWeek.isWeekend ? ' (weekend)' : ''}`);
+            if (temporalContext.pendingEvents.length > 0) {
+                console.log(`│   • Events: ${temporalContext.pendingEvents.length} tracked`);
+            }
+        }
+        if (dataLayerFormatted) {
+            console.log('│');
+            console.log('│ 🌡️ Life Context (Data Layer):');
+            console.log(`│   ${dataLayerFormatted.slice(0, 80)}...`);
+        }
         console.log('└────────────────────────────────────────────────────────┘');
     }
     return {
         relevantMemories: weLayerResult.associations,
         userPreferences,
         relationshipHistory,
+        temporalContext,
+        temporalFormatted,
         detectedEmotion: analysis.emotion,
         emotionalContext: analysis.emotionalContext,
         primaryIntent: analysis.intent,
@@ -144,6 +530,11 @@ async function assembleContextBrief(userId, message, previousTurns, debug) {
         topicsToExplore: approach.explorableTopics,
         toneGuidance: approach.tone,
         depthGuidance: approach.depth,
+        roleContext,
+        experienceBridge,
+        mindStateFormatted,
+        dataLayerContext,
+        dataLayerFormatted,
         processingTimeMs
     };
 }
@@ -282,6 +673,11 @@ function determineApproach(intent, emotion, turnCount) {
 export async function chat(message, options) {
     const { userId, debug } = options;
     const turnId = `turn_${Date.now()}`;
+    // ═══════════════════════════════════════════════════════════════════
+    // PHASE 0: INITIALIZE DATA LAYER
+    // Connect to real-time life context (Oura, Spotify, Calendar, etc.)
+    // ═══════════════════════════════════════════════════════════════════
+    await initializeDataLayer(debug ?? false);
     // Get or create session
     let session = sessions.get(userId);
     if (!session) {
@@ -374,11 +770,17 @@ export async function chat(message, options) {
     // Update working memory for next turn
     finalMindstate.workingMemory.lastTopic = extractTopic(message);
     // ═══════════════════════════════════════════════════════════════════
-    // PHASE 5: PERSIST TO MEMORY (NON-BLOCKING)
+    // PHASE 5: PERSIST TO MEMORY AND RECORD TIMESTAMP (NON-BLOCKING)
     // ═══════════════════════════════════════════════════════════════════
     persistConversation(userId, message, finalResponse, debug).catch((err) => {
         if (debug) {
             console.log(`│ ⚠️ Memory persistence failed: ${err.message}`);
+        }
+    });
+    // Record session timestamp for temporal tracking
+    recordSessionTimestamp(userId).catch((err) => {
+        if (debug) {
+            console.log(`│ ⚠️ Session timestamp failed: ${err instanceof Error ? err.message : 'unknown'}`);
         }
     });
     if (debug) {
@@ -402,6 +804,8 @@ export async function chat(message, options) {
 export async function* chatStream(message, options) {
     const { userId, debug } = options;
     const turnId = `turn_${Date.now()}`;
+    // Initialize Data Layer for streaming sessions too
+    await initializeDataLayer(debug ?? false);
     // Get or create session
     let session = sessions.get(userId);
     if (!session) {
@@ -490,6 +894,8 @@ export async function* chatStream(message, options) {
     yield { type: 'phase', phase: 'remembering' };
     // Persist (non-blocking)
     persistConversation(userId, message, fullResponse, debug).catch(() => { });
+    // Record session timestamp for temporal tracking
+    recordSessionTimestamp(userId).catch(() => { });
     // Done
     yield { type: 'done', turn };
 }

@@ -5,6 +5,10 @@
  * Uses clipboardy for cross-platform clipboard access.
  */
 import clipboard from 'clipboardy';
+import { execSync } from 'child_process';
+import { mkdirSync, existsSync } from 'fs';
+import { join } from 'path';
+import { tmpdir } from 'os';
 /**
  * Copy text to the system clipboard
  */
@@ -90,4 +94,132 @@ export function getAllCodeBlocks(text) {
         index++;
     }
     return blocks;
+}
+/**
+ * Check if clipboard contains an image (macOS only)
+ */
+function clipboardHasImage() {
+    if (process.platform !== 'darwin') {
+        return false;
+    }
+    try {
+        const info = execSync('osascript -e "clipboard info"', { encoding: 'utf-8' });
+        return info.includes('«class PNGf»') ||
+            info.includes('«class TIFF»') ||
+            info.includes('TIFF') ||
+            info.includes('public.png') ||
+            info.includes('public.tiff');
+    }
+    catch {
+        return false;
+    }
+}
+/**
+ * Save clipboard image to a file (macOS only)
+ * Returns the path to the saved image
+ */
+function saveClipboardImage() {
+    if (process.platform !== 'darwin') {
+        return null;
+    }
+    try {
+        // Create zosia temp directory
+        const zosiaDir = join(tmpdir(), 'zosia-clipboard');
+        if (!existsSync(zosiaDir)) {
+            mkdirSync(zosiaDir, { recursive: true });
+        }
+        const timestamp = Date.now();
+        const imagePath = join(zosiaDir, `clipboard-${timestamp}.png`);
+        // AppleScript to save clipboard image as PNG
+        const script = `
+      set theFile to POSIX file "${imagePath}"
+      try
+        set imageData to the clipboard as «class PNGf»
+        set fileRef to open for access theFile with write permission
+        write imageData to fileRef
+        close access fileRef
+        return "success"
+      on error errMsg
+        try
+          close access theFile
+        end try
+        return "error: " & errMsg
+      end try
+    `;
+        const result = execSync(`osascript -e '${script.replace(/'/g, "'\"'\"'")}'`, {
+            encoding: 'utf-8'
+        }).trim();
+        if (result === 'success') {
+            return imagePath;
+        }
+        return null;
+    }
+    catch {
+        return null;
+    }
+}
+/**
+ * Read from clipboard - handles both text and images
+ * For images, saves to temp file and returns the path
+ */
+export async function pasteFromClipboard() {
+    try {
+        // First check if clipboard has an image (macOS)
+        if (clipboardHasImage()) {
+            const imagePath = saveClipboardImage();
+            if (imagePath) {
+                return {
+                    type: 'image',
+                    imagePath,
+                };
+            }
+        }
+        // Try to read text
+        const text = await clipboard.read();
+        if (text && text.trim()) {
+            return {
+                type: 'text',
+                text,
+            };
+        }
+        return { type: 'empty' };
+    }
+    catch (error) {
+        return {
+            type: 'error',
+            error: error instanceof Error ? error.message : 'Unknown clipboard error',
+        };
+    }
+}
+/**
+ * Synchronous paste - for use in useInput handlers
+ */
+export function pasteFromClipboardSync() {
+    try {
+        // First check if clipboard has an image (macOS)
+        if (clipboardHasImage()) {
+            const imagePath = saveClipboardImage();
+            if (imagePath) {
+                return {
+                    type: 'image',
+                    imagePath,
+                };
+            }
+        }
+        // Try to read text synchronously
+        const text = clipboard.readSync();
+        if (text && text.trim()) {
+            return {
+                type: 'text',
+                text,
+            };
+        }
+        return { type: 'empty' };
+    }
+    catch (error) {
+        return {
+            type: 'error',
+            error: error instanceof Error ? error.message : 'Unknown clipboard error',
+        };
+    }
 }
