@@ -481,3 +481,189 @@ It tracks all tasks Claude agents work on for this feature.
   - Updated: 2026-01-06T21:06:06Z
   - ActiveForm: Testing local install
 
+- [x] **Fix panel text truncation in Developer view (labels like 'we lay', 'ToTotal: 00tats')**
+  - Status: completed
+  - Session: 20260107155715
+  - Updated: 2026-01-07T20:57:15Z
+  - ActiveForm: Fixing panel text truncation in Developer view
+
+- [x] **Fix split view Mind Activity panel content not showing**
+  - Status: completed
+  - Session: 20260107155715
+  - Updated: 2026-01-07T20:57:15Z
+  - ActiveForm: Fixing split view Mind Activity content
+
+- [x] **Fix input area getting cut off when conversation is long**
+  - Status: completed
+  - Session: 20260107155715
+  - Updated: 2026-01-07T20:57:15Z
+  - ActiveForm: Fixing input area layout
+
+- [x] **Fix lines overlapping/colliding in conversation view**
+  - Status: completed
+  - Session: 20260107155715
+  - Updated: 2026-01-07T20:57:15Z
+  - ActiveForm: Fixing text line overlapping
+
+- [x] **Verify all UI fixes work correctly**
+  - Status: completed
+  - Session: 20260107155715
+  - Updated: 2026-01-07T20:57:15Z
+  - ActiveForm: Verifying UI fixes
+
+- [-] **Fix label truncation - [I-LAYE] should be [I-LAYER], [WE-LAY] should be [WE-LAYER]**
+  - Status: in_progress
+  - Session: 20260107160125
+  - Updated: 2026-01-07T21:01:25Z
+  - ActiveForm: Fixing label truncation in split view
+
+- [ ] **Make left panel show actual content instead of placeholder**
+  - Status: pending
+  - Session: 20260107160125
+  - Updated: 2026-01-07T21:01:25Z
+  - ActiveForm: Making left panel show content
+
+- [x] **Fix label truncation - [I-LAYE] should be [I-LAYER], [WE-LAY] should be [WE-LAYER]**
+  - Status: completed
+  - Session: 20260107160428
+  - Updated: 2026-01-07T21:04:28Z
+  - ActiveForm: Fixing label truncation in split view
+
+- [-] **Make left panel show actual content instead of placeholder**
+  - Status: in_progress
+  - Session: 20260107160428
+  - Updated: 2026-01-07T21:04:29Z
+  - ActiveForm: Making left panel show content
+
+- [x] **Fix label truncation - [I-LAYE] should be [I-LAYER], [WE-LAY] should be [WE-LAYER]**
+  - Status: completed
+  - Session: 20260107160910
+  - Updated: 2026-01-07T21:09:10Z
+  - ActiveForm: Fixing label truncation in split view
+
+- [x] **Make left panel show actual content instead of placeholder**
+  - Status: completed
+  - Session: 20260107160910
+  - Updated: 2026-01-07T21:09:10Z
+  - ActiveForm: Making left panel show content
+
+- [-] **Create ContextBriefPanel for debugging contextBrief state**
+  - Status: in_progress
+  - Session: 20260107193301
+  - Updated: 2026-01-08T00:33:01Z
+  - ActiveForm: Creating ContextBriefPanel for debugging
+
+- [ ] **Enhance InternalStatePanel to show associations array**
+  - Status: pending
+  - Session: 20260107193301
+  - Updated: 2026-01-08T00:33:01Z
+  - ActiveForm: Enhancing InternalStatePanel
+
+- [ ] **Update developer view to show all 4 panels**
+  - Status: pending
+  - Session: 20260107193301
+  - Updated: 2026-01-08T00:33:01Z
+  - ActiveForm: Updating developer view layout
+
+- [ ] **Build and test the changes**
+  - Status: pending
+  - Session: 20260107193301
+  - Updated: 2026-01-08T00:33:01Z
+  - ActiveForm: Building and testing
+
+- [x] **Create ContextBriefPanel for debugging contextBrief state**
+  - Status: completed
+  - Session: 20260107193348
+  - Updated: 2026-01-08T00:33:48Z
+  - ActiveForm: Creating ContextBriefPanel for debugging
+
+- [-] **Enhance InternalStatePanel to show associations array**
+  - Status: in_progress
+  - Session: 20260107193348
+  - Updated: 2026-01-08T00:33:48Z
+  - ActiveForm: Enhancing InternalStatePanel
+
+- [ ] **Update developer view to show all 4 panels**
+  - Status: pending
+  - Session: 20260107193348
+  - Updated: 2026-01-08T00:33:48Z
+  - ActiveForm: Updating developer view layout
+
+- [ ] **Build and test the changes**
+  - Status: pending
+  - Session: 20260107193348
+  - Updated: 2026-01-08T00:33:48Z
+  - ActiveForm: Building and testing
+
+- [x] **Create ContextBriefPanel for debugging contextBrief state**
+  - Status: completed
+  - Session: 20260107193417
+  - Updated: 2026-01-08T00:34:17Z
+  - ActiveForm: Creating ContextBriefPanel for debugging
+
+- [x] **Enhance InternalStatePanel to show associations array**
+  - Status: completed
+  - Session: 20260107193417
+  - Updated: 2026-01-08T00:34:17Z
+  - ActiveForm: Enhancing InternalStatePanel
+
+- [-] **Update developer view to show all 4 panels**
+  - Status: in_progress
+  - Session: 20260107193417
+  - Updated: 2026-01-08T00:34:17Z
+  - ActiveForm: Updating developer view layout
+
+- [ ] **Build and test the changes**
+  - Status: pending
+  - Session: 20260107193417
+  - Updated: 2026-01-08T00:34:17Z
+  - ActiveForm: Building and testing
+
+- [x] **Create ContextBriefPanel for debugging contextBrief state**
+  - Status: completed
+  - Session: 20260107193450
+  - Updated: 2026-01-08T00:34:50Z
+  - ActiveForm: Creating ContextBriefPanel for debugging
+
+- [x] **Enhance InternalStatePanel to show associations array**
+  - Status: completed
+  - Session: 20260107193450
+  - Updated: 2026-01-08T00:34:50Z
+  - ActiveForm: Enhancing InternalStatePanel
+
+- [x] **Update developer view to show all 4 panels**
+  - Status: completed
+  - Session: 20260107193450
+  - Updated: 2026-01-08T00:34:50Z
+  - ActiveForm: Updating developer view layout
+
+- [-] **Build and test the changes**
+  - Status: in_progress
+  - Session: 20260107193450
+  - Updated: 2026-01-08T00:34:50Z
+  - ActiveForm: Building and testing
+
+- [x] **Create ContextBriefPanel for debugging contextBrief state**
+  - Status: completed
+  - Session: 20260107193519
+  - Updated: 2026-01-08T00:35:19Z
+  - ActiveForm: Creating ContextBriefPanel for debugging
+
+- [x] **Enhance InternalStatePanel to show associations array**
+  - Status: completed
+  - Session: 20260107193519
+  - Updated: 2026-01-08T00:35:19Z
+  - ActiveForm: Enhancing InternalStatePanel
+
+- [x] **Update developer view to show all 4 panels**
+  - Status: completed
+  - Session: 20260107193519
+  - Updated: 2026-01-08T00:35:19Z
+  - ActiveForm: Updating developer view layout
+
+- [x] **Build and test the changes**
+  - Status: completed
+  - Session: 20260107193519
+  - Updated: 2026-01-08T00:35:19Z
+  - ActiveForm: Building and testing
+
