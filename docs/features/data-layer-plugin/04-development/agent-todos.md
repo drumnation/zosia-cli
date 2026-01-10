@@ -649,3 +649,57 @@ It tracks all tasks Claude agents work on for this feature.
   - Updated: 2026-01-10T16:23:53Z
   - ActiveForm: Committing documentation and tests
 
+- [x] **Commit dual-layer-interpretation feature (experience synthesizer, roles, prompts)**
+  - Status: completed
+  - Session: 20260110112416
+  - Updated: 2026-01-10T16:24:16Z
+  - ActiveForm: Committing dual-layer-interpretation feature
+
+- [x] **Commit data-layer-plugin feature (fetchers, Gmail, Withings, RescueTime)**
+  - Status: completed
+  - Session: 20260110112416
+  - Updated: 2026-01-10T16:24:16Z
+  - ActiveForm: Committing data-layer-plugin feature
+
+- [x] **Commit interactive improvements and model service updates**
+  - Status: completed
+  - Session: 20260110112416
+  - Updated: 2026-01-10T16:24:16Z
+  - ActiveForm: Committing interactive improvements
+
+- [-] **Commit remaining dist files and documentation**
+  - Status: in_progress
+  - Session: 20260110112416
+  - Updated: 2026-01-10T16:24:16Z
+  - ActiveForm: Committing remaining dist files and documentation
+
+- [ ] **Commit tests and experiments**
+  - Status: pending
+  - Session: 20260110112416
+  - Updated: 2026-01-10T16:24:16Z
+  - ActiveForm: Committing tests and experiments
+
+- [x] **Commit dual-layer interpretation feature**
+  - Status: completed
+  - Session: 20260110112426
+  - Updated: 2026-01-10T16:24:26Z
+  - ActiveForm: Committed dual-layer interpretation feature
+
+- [x] **Commit data-layer plugin feature**
+  - Status: completed
+  - Session: 20260110112426
+  - Updated: 2026-01-10T16:24:26Z
+  - ActiveForm: Committed data-layer plugin feature
+
+- [x] **Commit core CLI updates**
+  - Status: completed
+  - Session: 20260110112426
+  - Updated: 2026-01-10T16:24:26Z
+  - ActiveForm: Committed core CLI updates
+
+- [x] **Commit documentation and tests**
+  - Status: completed
+  - Session: 20260110112426
+  - Updated: 2026-01-10T16:24:26Z
+  - ActiveForm: Committed documentation and tests
+
