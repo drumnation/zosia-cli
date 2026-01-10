@@ -49,7 +49,8 @@ import {
   type ImageContent,
 } from './attachments.js';
 import { renderWithHighlighting, highlightCode, parseCodeBlocks } from './syntax-highlight.js';
-import { copyToClipboard, extractCodeBlock, countCodeBlocks, getAllCodeBlocks, type ExtractedCodeBlock } from './clipboard.js';
+import { copyToClipboard, extractCodeBlock, countCodeBlocks, getAllCodeBlocks, pasteFromClipboardSync, type ExtractedCodeBlock, type PasteResult } from './clipboard.js';
+import { encodeImageToken, decodeImageTokens, hasImageTokens, formatImageRef } from './image-preview.js';
 import { createHistoryManager, getDefaultHistoryPath, type HistoryManager } from './history.js';
 import { createMultilineHandler, type MultilineHandler, type KeyEvent } from './multiline-input.js';
 import { useFileAutocomplete, FileAutocompleteDropdown } from './file-autocomplete.js';
@@ -81,7 +82,8 @@ import {
 } from './context-handoff.js';
 import { getSession as getAuthSession } from './auth.js';
 import type { Turn, DebugInfo } from './types.js';
-import { getCustomPrompts, setCustomPrompt, clearCustomPrompt, clearAllCustomPrompts } from './config.js';
+import { getCustomPrompts, setCustomPrompt, clearCustomPrompt, clearAllCustomPrompts, getConsciousMindConfig, setConsciousMindModel } from './config.js';
+import { getNextRecommendedModel, getPreviousRecommendedModel, getModelShortInfo, getModelPosition, RECOMMENDED_CONSCIOUS_MODELS } from './model-service.js';
 import { I_LAYER_PROMPT, WE_LAYER_PROMPT, IDENTITY_KERNEL } from './prompts.js';
 import { createSessionTracker, formatSessionInfo, type TrackedSession } from './session-tracker.js';
 import {
@@ -610,6 +612,7 @@ const Header = memo<{
   tokenStats?: TokenStats;
   viewMode: ViewMode;
   otherSessions?: TrackedSession[];
+  terminalWidth?: number;
 }>(({
   verbose,
   memoryActive,
@@ -617,7 +620,12 @@ const Header = memo<{
   tokenStats,
   viewMode,
   otherSessions = [],
+  terminalWidth = 80,
 }) => {
+  // Responsive breakpoints for header content
+  const isCompact = terminalWidth < 80;
+  const isMedium = terminalWidth >= 80 && terminalWidth < 120;
+  const isWide = terminalWidth >= 120;
   const phaseEmoji: Record<FlowPhase, string> = {
     idle: '○',
     receiving: '◀',
@@ -647,6 +655,14 @@ const Header = memo<{
     ? `[${('█'.repeat(Math.round(contextPercent / 10)) + '░'.repeat(10 - Math.round(contextPercent / 10))).slice(0, 10)}]`
     : '';
 
+  // Short view mode labels for compact display
+  const viewModeShort: Record<ViewMode, string> = {
+    companion: 'Cmp',
+    summary: 'Sum',
+    split: 'Spl',
+    developer: 'Dev',
+  };
+
   return (
     <Box
       borderStyle="double"
@@ -654,46 +670,50 @@ const Header = memo<{
       paddingX={1}
       marginBottom={0}
       justifyContent="space-between"
+      overflow="hidden"
     >
-      <Box>
-        <Text bold color={C.purple}>
-          ✧ ZOSIA
-        </Text>
-        <Text color={C.gray}> v{pkg.version}</Text>
-        <Text color={C.gray}> · Unified Being</Text>
+      {/* Left side: Brand + Phase */}
+      <Box flexShrink={0}>
+        <Text bold color={C.purple}>✧ ZOSIA</Text>
+        {!isCompact && <Text color={C.gray}> v{pkg.version}</Text>}
+        {isWide && <Text color={C.gray}> · Being</Text>}
         <Text color={C.gray}> </Text>
         <Text color={C.yellow}>{phaseEmoji[phase]}</Text>
       </Box>
-      <Box>
-        {/* Context window indicator */}
-        {contextPercent > 0 && (
+
+      {/* Right side: Status indicators */}
+      <Box flexShrink={1} overflow="hidden">
+        {/* Context window indicator - hide on compact */}
+        {!isCompact && contextPercent > 0 && (
           <>
             <Text color={contextColor}>{contextBar}</Text>
             <Text color={contextColor}> {contextPercent}%</Text>
             <Text color={C.gray}> · </Text>
           </>
         )}
-        {/* Token/Cost display */}
-        {totalTokens > 0 && (
+        {/* Token/Cost display - hide on compact */}
+        {!isCompact && totalTokens > 0 && (
           <>
             <Text color={C.green}>{tokenDisplay}</Text>
             {costDisplay && <Text color={C.orange}> {costDisplay}</Text>}
             <Text color={C.gray}> · </Text>
           </>
         )}
-        <Text color={C.purple}>[{VIEW_MODE_LABELS[viewMode]}]</Text>
+        {/* View mode - always show, but abbreviated on narrow */}
+        <Text color={C.purple}>[{isCompact ? viewModeShort[viewMode] : VIEW_MODE_LABELS[viewMode]}]</Text>
         <Text color={C.gray}> · </Text>
+        {/* Memory indicator - always show */}
         <Text>{memoryActive ? '🧠' : '⚠️'}</Text>
-        <Text color={C.gray}> Memory</Text>
-        {/* Multi-session HUD */}
-        {otherSessions.length > 0 && (
+        {!isCompact && <Text color={C.gray}> Mem</Text>}
+        {/* Multi-session HUD - only on medium+ */}
+        {!isCompact && otherSessions.length > 0 && (
           <>
             <Text color={C.gray}> · </Text>
-            <Text color={C.orange}>🔗 +{otherSessions.length}</Text>
-            <Text color={C.gray}> bg</Text>
+            <Text color={C.orange}>🔗+{otherSessions.length}</Text>
           </>
         )}
-        <Text dimColor> · Tab to cycle</Text>
+        {/* Tab hint - only on wide */}
+        {isWide && <Text dimColor> · Tab</Text>}
       </Box>
     </Box>
   );
@@ -702,7 +722,7 @@ Header.displayName = 'Header';
 
 /** Internal State Panel - Shows Zosia's unified being state - memoized */
 const InternalStatePanel = memo<{ being: BeingState; status: SystemStatus }>(({ being, status }) => (
-  <Panel title="─ Internal State ─" borderColor={C.purple}>
+  <Panel title="─ Internal State ─" borderColor={C.purple} overflow="hidden">
     {/* Unconscious (We-Layer) */}
     <Box flexDirection="column" marginBottom={1}>
       <Box>
@@ -711,16 +731,30 @@ const InternalStatePanel = memo<{ being: BeingState; status: SystemStatus }>(({ 
         <Text dimColor> (We)</Text>
         {status.memory.connected && <Text color={C.green}> ●</Text>}
       </Box>
-      <Box marginLeft={3} flexDirection="column">
-        <Box flexDirection="column">
-          <Text color={C.gray}>Sensing: </Text>
-          <Text color={C.blue} wrap="wrap">{being.unconscious.sensing || '...'}</Text>
-        </Box>
+      <Box marginLeft={3}>
+        <Text color={C.gray}>Sensing: </Text>
+        <Text color={C.blue}>{being.unconscious.sensing || '...'}</Text>
       </Box>
       <Box marginLeft={3}>
         <Text color={C.gray}>Memories: </Text>
         <Text color={C.orange}>{being.unconscious.memories}</Text>
       </Box>
+      {/* Associations from We-Layer */}
+      {being.unconscious.associations.length > 0 && (
+        <Box marginLeft={3} flexDirection="column">
+          <Text color={C.gray}>Associations:</Text>
+          {being.unconscious.associations.slice(0, 3).map((assoc, i) => (
+            <Box key={i} marginLeft={2}>
+              <Text color={C.blue}>• {assoc}</Text>
+            </Box>
+          ))}
+          {being.unconscious.associations.length > 3 && (
+            <Box marginLeft={2}>
+              <Text dimColor>+{being.unconscious.associations.length - 3} more</Text>
+            </Box>
+          )}
+        </Box>
+      )}
     </Box>
 
     {/* Integration bridge */}
@@ -728,11 +762,15 @@ const InternalStatePanel = memo<{ being: BeingState; status: SystemStatus }>(({ 
       <Box>
         <Text color={C.gray}>├── </Text>
         <Text dimColor italic>emotion: </Text>
-        <Text color={C.yellow} wrap="wrap">{being.integration.emotion || 'neutral'}</Text>
+        <Text color={C.yellow}>{being.integration.emotion || 'neutral'}</Text>
       </Box>
       <Box marginLeft={4}>
         <Text dimColor italic>intent: </Text>
-        <Text color={C.cyan} wrap="wrap">{being.integration.intent || 'listening'}</Text>
+        <Text color={C.cyan}>{being.integration.intent || 'listening'}</Text>
+      </Box>
+      <Box marginLeft={4}>
+        <Text dimColor italic>depth: </Text>
+        <Text color={C.purple}>{being.integration.depth || 'brief'}</Text>
       </Box>
     </Box>
 
@@ -744,9 +782,9 @@ const InternalStatePanel = memo<{ being: BeingState; status: SystemStatus }>(({ 
         <Text dimColor> (I)</Text>
         {status.iLayer.ready && <Text color={C.green}> ●</Text>}
       </Box>
-      <Box marginLeft={3} flexDirection="column">
+      <Box marginLeft={3}>
         <Text color={C.gray}>Thinking: </Text>
-        <Text color={C.green} wrap="wrap">{being.conscious.thinking || '...'}</Text>
+        <Text color={C.green}>{being.conscious.thinking || '...'}</Text>
       </Box>
       {being.conscious.tokens.output > 0 && (
         <Box marginLeft={3}>
@@ -941,6 +979,73 @@ const SessionStatsPanel = memo<{
 });
 SessionStatsPanel.displayName = 'SessionStatsPanel';
 
+/** Context Brief Panel - Shows We-Layer context analysis - DEBUGGING PANEL */
+const ContextBriefPanel = memo<{ contextBrief: ContextBriefState | null; being: BeingState }>(
+  ({ contextBrief, being }) => {
+    return (
+      <Panel title="─ Context Brief ─" borderColor={C.yellow}>
+        {/* Emotional State */}
+        <Box flexDirection="column" marginBottom={1}>
+          <Text color={C.gray} bold>Emotional State</Text>
+          <Box marginLeft={2} flexDirection="column">
+            <Box>
+              <Text color={C.gray}>Detected: </Text>
+              <Text color={C.yellow}>{contextBrief?.emotion || being.integration.emotion || '...'}</Text>
+            </Box>
+          </Box>
+        </Box>
+
+        {/* Intent Analysis */}
+        <Box flexDirection="column" marginBottom={1}>
+          <Text color={C.gray} bold>Intent Analysis</Text>
+          <Box marginLeft={2} flexDirection="column">
+            <Box>
+              <Text color={C.gray}>Intent: </Text>
+              <Text color={C.cyan}>{contextBrief?.intent || being.integration.intent || '...'}</Text>
+            </Box>
+          </Box>
+        </Box>
+
+        {/* Processing Depth */}
+        <Box flexDirection="column" marginBottom={1}>
+          <Text color={C.gray} bold>Processing Depth</Text>
+          <Box marginLeft={2}>
+            <Text color={C.gray}>Level: </Text>
+            <Text color={C.purple}>{contextBrief?.depth || being.integration.depth || 'brief'}</Text>
+          </Box>
+        </Box>
+
+        {/* Memory Usage */}
+        <Box flexDirection="column" marginBottom={1}>
+          <Text color={C.gray} bold>Memory</Text>
+          <Box marginLeft={2}>
+            <Text color={C.gray}>Retrieved: </Text>
+            <Text color={C.orange}>{contextBrief?.memoriesUsed || being.unconscious.memories || 0}</Text>
+          </Box>
+        </Box>
+
+        {/* Associations (from being state) */}
+        <Box flexDirection="column">
+          <Text color={C.gray} bold>Associations</Text>
+          {being.unconscious.associations.length > 0 ? (
+            being.unconscious.associations.map((assoc, i) => (
+              <Box key={i} marginLeft={2}>
+                <Text color={C.gray}>• </Text>
+                <Text color={C.blue}>{assoc}</Text>
+              </Box>
+            ))
+          ) : (
+            <Box marginLeft={2}>
+              <Text dimColor italic>None surfaced</Text>
+            </Box>
+          )}
+        </Box>
+      </Panel>
+    );
+  }
+);
+ContextBriefPanel.displayName = 'ContextBriefPanel';
+
 /** Mind Activity Log - Shows the being's internal processing - memoized with custom comparison */
 const MindActivity = memo<{
   logs: LogEntry[];
@@ -973,8 +1078,8 @@ const MindActivity = memo<{
   };
 
   return (
-    <Panel title="─ Mind Activity ─" borderColor={C.gray} flexGrow={1}>
-      <Box flexDirection="column" flexGrow={1}>
+    <Panel title="─ Mind Activity ─" borderColor={C.gray} flexGrow={1} overflow="hidden">
+      <Box flexDirection="column" flexGrow={1} overflow="hidden">
         {visibleLogs.length === 0 ? (
           <Text dimColor italic>
             Activity will appear here...
@@ -1048,14 +1153,40 @@ const MindActivity = memo<{
               );
             }
 
+            // Layer entries - single line with separator for stability
+            if (entry.level === 'layer' || entry.source === 'we-layer' || entry.source === 'i-layer') {
+              return (
+                <Box key={entry.id} marginBottom={2}>
+                  <Text dimColor>{timeStr} </Text>
+                  <Text color={color}>{icon} </Text>
+                  <Text color={color} bold>[{entry.source.toUpperCase()}]</Text>
+                  <Text color={color}> → </Text>
+                  <Text color={color} wrap="wrap">{entry.message}</Text>
+                </Box>
+              );
+            }
+
+            // Memory entries - single line with separator
+            if (entry.source === 'memory') {
+              return (
+                <Box key={entry.id} marginBottom={2}>
+                  <Text dimColor>{timeStr} </Text>
+                  <Text color={C.orange}>◆ </Text>
+                  <Text color={C.orange} bold>[MEMORY]</Text>
+                  <Text color={C.orange}> → </Text>
+                  <Text color={C.orange} wrap="wrap">{entry.message}</Text>
+                </Box>
+              );
+            }
+
+            // Default single-line formatting for system/info
             return (
-              <Box key={entry.id}>
+              <Box key={entry.id} marginBottom={2}>
                 <Text dimColor>{timeStr} </Text>
                 <Text color={color}>{icon} </Text>
-                <Text color={color} bold>
-                  [{entry.source.toUpperCase()}]
-                </Text>
-                <Text wrap="wrap"> {entry.message}</Text>
+                <Text color={color}>[{entry.source.toUpperCase()}]</Text>
+                <Text> </Text>
+                <Text wrap="wrap">{entry.message}</Text>
               </Box>
             );
           })
@@ -1105,6 +1236,48 @@ const InputArea: React.FC<{
 
   // Handle special keys: autocomplete, history navigation and multi-line input
   useInput((input, key) => {
+    // Handle paste: Multiple detection methods for Ctrl+V / Cmd+V / Ctrl+Shift+V
+    // Note: In most terminals, Ctrl+V is intercepted by the terminal itself for paste.
+    // Kitty and other terminals paste directly to stdin. We detect:
+    // 1. Raw Ctrl+V character code (0x16 = \x16) - if terminal passes it through
+    // 2. 'v' with ctrl/meta modifier - if Ink detects the modifier
+    // 3. 'V' (uppercase) with ctrl - Ctrl+Shift+V (more likely to pass through)
+    // 4. Unicode control character
+    const isCtrlV = input === '\x16' ||
+                    input === '\u0016' ||
+                    (input === 'v' && (key.meta || key.ctrl)) ||
+                    (input === 'V' && key.ctrl);
+
+    if (isCtrlV) {
+      const result = pasteFromClipboardSync();
+      if (result.type === 'text' && result.text) {
+        // Paste text at cursor position
+        onChange(value + result.text);
+        multilineRef.current.setValue(value + result.text);
+      } else if (result.type === 'image' && result.imagePath) {
+        // Insert image path as @reference
+        const imageRef = `@${result.imagePath}`;
+        onChange(value + imageRef);
+        multilineRef.current.setValue(value + imageRef);
+      }
+      return;
+    }
+
+    // Handle Option+V on macOS - produces √ (square root symbol)
+    // This is a reliable paste trigger since terminals don't intercept it
+    if (input === '√' || input === 'v' && key.meta) {
+      const result = pasteFromClipboardSync();
+      if (result.type === 'text' && result.text) {
+        onChange(value + result.text);
+        multilineRef.current.setValue(value + result.text);
+      } else if (result.type === 'image' && result.imagePath) {
+        const imageRef = `@${result.imagePath}`;
+        onChange(value + imageRef);
+        multilineRef.current.setValue(value + imageRef);
+      }
+      return;
+    }
+
     // File autocomplete takes priority when visible
     if (autocomplete.visible) {
       const handled = autocomplete.handleKeyPress({
@@ -1225,6 +1398,47 @@ const InputArea: React.FC<{
           <TextInput
             value={currentLine}
             onChange={(newCurrentLine) => {
+              // Check if √ was typed (Option+V on macOS) - trigger paste instead
+              if (newCurrentLine.includes('√') && !currentLine.includes('√')) {
+                // Remove the √ and trigger paste
+                const cleanedLine = newCurrentLine.replace('√', '');
+                const result = pasteFromClipboardSync();
+                if (result.type === 'text' && result.text) {
+                  const pastedLine = cleanedLine + result.text;
+                  if (isMultiline) {
+                    const newValue = [...previousLines, pastedLine].join('\n');
+                    multilineRef.current.setValue(newValue);
+                    onChange(newValue);
+                  } else {
+                    multilineRef.current.setValue(pastedLine);
+                    onChange(pastedLine);
+                  }
+                } else if (result.type === 'image' && result.imagePath) {
+                  // Use nice compact token instead of raw path
+                  const imageToken = encodeImageToken(result.imagePath);
+                  const pastedLine = cleanedLine + imageToken;
+                  if (isMultiline) {
+                    const newValue = [...previousLines, pastedLine].join('\n');
+                    multilineRef.current.setValue(newValue);
+                    onChange(newValue);
+                  } else {
+                    multilineRef.current.setValue(pastedLine);
+                    onChange(pastedLine);
+                  }
+                } else {
+                  // No clipboard content, just remove the √
+                  if (isMultiline) {
+                    const newValue = [...previousLines, cleanedLine].join('\n');
+                    multilineRef.current.setValue(newValue);
+                    onChange(newValue);
+                  } else {
+                    multilineRef.current.setValue(cleanedLine);
+                    onChange(cleanedLine);
+                  }
+                }
+                return;
+              }
+
               // Update only the current line, preserve previous lines
               if (isMultiline) {
                 const newValue = [...previousLines, newCurrentLine].join('\n');
@@ -1426,42 +1640,51 @@ const InteractiveApp: React.FC<InteractiveProps> = ({ userId, verbose: initialVe
   }, [terminalWidth]);
 
   // Layout configuration based on terminal size
+  // Use calculated pixel widths instead of percentages to prevent truncation
   const layoutConfig = useMemo(() => {
+    const minPanelWidth = 40; // Minimum width to show full labels like "Unconscious (We)"
+
     switch (layoutSize) {
       case 'ultra-wide':
+        // 3 panels - divide terminal width by 3, ensure minimum
+        const thirdWidth = Math.max(minPanelWidth, Math.floor(terminalWidth / 3) - 2);
         return {
-          panelWidth: '33%' as const,
+          panelWidth: thirdWidth,
           showThirdPanel: true,
           logMaxLines: Math.max(8, terminalHeight - 14),
           expandPanels: true,
           horizontalPadding: 2,
         };
       case 'wide':
+        // 2 panels - divide terminal width by 2
+        const halfWidthWide = Math.max(minPanelWidth, Math.floor(terminalWidth / 2) - 2);
         return {
-          panelWidth: '50%' as const,
+          panelWidth: halfWidthWide,
           showThirdPanel: false,
           logMaxLines: Math.max(6, terminalHeight - 16),
           expandPanels: true,
           horizontalPadding: 1,
         };
       case 'medium':
+        // 2 panels in medium mode
+        const halfWidthMedium = Math.max(minPanelWidth, Math.floor(terminalWidth / 2) - 1);
         return {
-          panelWidth: '50%' as const,
+          panelWidth: halfWidthMedium,
           showThirdPanel: false,
           logMaxLines: Math.max(5, terminalHeight - 18),
           expandPanels: false,
           horizontalPadding: 1,
         };
-      default: // compact
+      default: // compact - stack panels vertically
         return {
-          panelWidth: '100%' as const,
+          panelWidth: terminalWidth - 2,
           showThirdPanel: false,
           logMaxLines: Math.max(4, terminalHeight - 20),
           expandPanels: false,
           horizontalPadding: 0,
         };
     }
-  }, [layoutSize, terminalHeight]);
+  }, [layoutSize, terminalHeight, terminalWidth]);
 
   const logMaxLines = layoutConfig.logMaxLines;
 
@@ -2059,6 +2282,119 @@ const InteractiveApp: React.FC<InteractiveProps> = ({ userId, verbose: initialVe
           }
           return true;
 
+        case 'model':
+          const modelSubcmd = args[0]?.toLowerCase();
+          const currentModelConfig = getConsciousMindConfig();
+          const currentModelId = currentModelConfig.model;
+          const modelInfo = getModelShortInfo(currentModelId);
+          const modelPos = getModelPosition(currentModelId);
+
+          if (!modelSubcmd || modelSubcmd === 'info') {
+            // Show current model info
+            log('info', 'system', '═══ CONSCIOUS MIND MODEL ═══');
+            log('info', 'system', `Current: ${currentModelId}`);
+            log('info', 'system', `  Tier: ${modelInfo.tier} (${modelInfo.score})`);
+            log('info', 'system', `  Position: ${modelPos.current}/${modelPos.total} in recommended list`);
+            log('info', 'system', '');
+            log('info', 'system', 'Controls:');
+            log('info', 'system', '  /model list       - Show all ranked models');
+            log('info', 'system', '  /model set <id>   - Set model by ID');
+            log('info', 'system', '  /model next       - Cycle to next model (Ctrl+])');
+            log('info', 'system', '  /model prev       - Cycle to previous model (Ctrl+[)');
+          } else if (modelSubcmd === 'list') {
+            // Show all recommended models grouped by tier
+            log('info', 'system', '═══ RECOMMENDED MODELS (Ranked by Experiment Scores) ═══');
+            log('info', 'system', '');
+
+            // Group models by tier for display
+            const topTier = RECOMMENDED_CONSCIOUS_MODELS.slice(0, 10);
+            const highTier = RECOMMENDED_CONSCIOUS_MODELS.slice(10, 20);
+            const goodTier = RECOMMENDED_CONSCIOUS_MODELS.slice(20);
+
+            log('info', 'system', '▸ TOP TIER (94-100% scores):');
+            for (const m of topTier) {
+              const isCurrent = m === currentModelId ? ' ◀ CURRENT' : '';
+              const isFree = m.includes(':free') ? ' [FREE]' : '';
+              log('info', 'system', `    ${m}${isFree}${isCurrent}`);
+            }
+            log('info', 'system', '');
+
+            log('info', 'system', '▸ HIGH TIER (89% scores):');
+            for (const m of highTier) {
+              const isCurrent = m === currentModelId ? ' ◀ CURRENT' : '';
+              const isFree = m.includes(':free') ? ' [FREE]' : '';
+              log('info', 'system', `    ${m}${isFree}${isCurrent}`);
+            }
+            log('info', 'system', '');
+
+            log('info', 'system', '▸ GOOD TIER (83% scores):');
+            for (const m of goodTier) {
+              const isCurrent = m === currentModelId ? ' ◀ CURRENT' : '';
+              const isFree = m.includes(':free') ? ' [FREE]' : '';
+              log('info', 'system', `    ${m}${isFree}${isCurrent}`);
+            }
+            log('info', 'system', '');
+            log('info', 'system', 'Usage: /model set <model_id>');
+          } else if (modelSubcmd === 'set') {
+            const newModelId = args[1];
+            if (!newModelId) {
+              log('error', 'system', 'Usage: /model set <model_id>');
+              log('info', 'system', 'Run /model list to see available models');
+            } else {
+              try {
+                await setConsciousMindModel(newModelId);
+                const newInfo = getModelShortInfo(newModelId);
+                log('info', 'system', `✓ Model changed to: ${newModelId}`);
+                log('info', 'system', `  Tier: ${newInfo.tier} (${newInfo.score})`);
+                // Update the system status to reflect new model
+                setSystemStatus((prev) => ({
+                  ...prev,
+                  iLayer: { ...prev.iLayer, model: newModelId },
+                }));
+              } catch (error) {
+                log('error', 'system', `Failed to set model: ${error instanceof Error ? error.message : 'Unknown error'}`);
+              }
+            }
+          } else if (modelSubcmd === 'next') {
+            const nextModel = getNextRecommendedModel(currentModelId);
+            try {
+              await setConsciousMindModel(nextModel);
+              const newInfo = getModelShortInfo(nextModel);
+              const newPos = getModelPosition(nextModel);
+              log('info', 'system', `✓ Model: ${nextModel} (${newPos.current}/${newPos.total})`);
+              log('info', 'system', `  ${newInfo.tier} - ${newInfo.score}`);
+              setSystemStatus((prev) => ({
+                ...prev,
+                iLayer: { ...prev.iLayer, model: nextModel },
+              }));
+            } catch (error) {
+              log('error', 'system', `Failed to cycle model: ${error instanceof Error ? error.message : 'Unknown error'}`);
+            }
+          } else if (modelSubcmd === 'prev') {
+            const prevModel = getPreviousRecommendedModel(currentModelId);
+            try {
+              await setConsciousMindModel(prevModel);
+              const newInfo = getModelShortInfo(prevModel);
+              const newPos = getModelPosition(prevModel);
+              log('info', 'system', `✓ Model: ${prevModel} (${newPos.current}/${newPos.total})`);
+              log('info', 'system', `  ${newInfo.tier} - ${newInfo.score}`);
+              setSystemStatus((prev) => ({
+                ...prev,
+                iLayer: { ...prev.iLayer, model: prevModel },
+              }));
+            } catch (error) {
+              log('error', 'system', `Failed to cycle model: ${error instanceof Error ? error.message : 'Unknown error'}`);
+            }
+          } else {
+            log('info', 'system', 'Usage: /model [list|set <model_id>|info|next|prev]');
+            log('info', 'system', '  info    - Show current model details');
+            log('info', 'system', '  list    - Show all ranked models by tier');
+            log('info', 'system', '  set     - Change to a specific model');
+            log('info', 'system', '  next    - Cycle to next ranked model');
+            log('info', 'system', '  prev    - Cycle to previous ranked model');
+          }
+          return true;
+
         case 'onboarding':
           const onboardingSubcmd = args[0]?.toLowerCase();
 
@@ -2310,7 +2646,12 @@ const InteractiveApp: React.FC<InteractiveProps> = ({ userId, verbose: initialVe
                   depth: event.data.depth,
                 },
               }));
-              log('layer', 'we-layer', `Sensed: ${event.data.emotion} · Intent: ${event.data.intent} · Memories: ${event.data.memories}`);
+              // Log context data as separate readable items
+              log('layer', 'we-layer', `Sensed: ${event.data.emotion}`);
+              log('layer', 'we-layer', `Intent: ${event.data.intent}`);
+              if (event.data.memories) {
+                log('layer', 'we-layer', `Memories: ${event.data.memories}`);
+              }
               break;
 
             case 'token':
@@ -2517,6 +2858,9 @@ const InteractiveApp: React.FC<InteractiveProps> = ({ userId, verbose: initialVe
       const trimmed = value.trim();
       if (!trimmed) return;
 
+      // Decode any image tokens back to @path format before sending
+      const decodedValue = hasImageTokens(trimmed) ? decodeImageTokens(trimmed) : trimmed;
+
       // Add to history (for both commands and messages)
       historyRef.current.add(trimmed);
 
@@ -2533,7 +2877,7 @@ const InteractiveApp: React.FC<InteractiveProps> = ({ userId, verbose: initialVe
       if (processing) {
         setMessageQueue((prev) => [
           ...prev,
-          { id: generateLogId(), text: trimmed, queuedAt: new Date() },
+          { id: generateLogId(), text: decodedValue, queuedAt: new Date() },
         ]);
         log('info', 'system', `Queued: "${trimmed.slice(0, 30)}${trimmed.length > 30 ? '...' : ''}"`);
         setInputValue('');
@@ -2548,7 +2892,7 @@ const InteractiveApp: React.FC<InteractiveProps> = ({ userId, verbose: initialVe
       setAbortController(controller);
 
       try {
-        await processMessage(trimmed, controller);
+        await processMessage(decodedValue, controller);
 
         // Back to idle after short delay
         setTimeout(() => {
@@ -2616,8 +2960,8 @@ const InteractiveApp: React.FC<InteractiveProps> = ({ userId, verbose: initialVe
     if (key.tab) {
       cycleViewMode();
     }
-    // ? to toggle keyboard shortcuts help
-    if (input === '?') {
+    // ? to toggle keyboard shortcuts help (only when not typing)
+    if (input === '?' && !inputValue) {
       setShowShortcuts((prev) => !prev);
     }
 
@@ -2641,6 +2985,26 @@ const InteractiveApp: React.FC<InteractiveProps> = ({ userId, verbose: initialVe
     }
     if (key.downArrow && hasCodeBlocks && !processing) {
       navigateCodeBlock('down');
+    }
+
+    // Ctrl+] to cycle to next recommended model
+    if (key.ctrl && input === ']') {
+      const currentModel = getConsciousMindConfig().model;
+      const nextModel = getNextRecommendedModel(currentModel);
+      setConsciousMindModel(nextModel);
+      const info = getModelShortInfo(nextModel);
+      const pos = getModelPosition(nextModel);
+      log('info', 'system', `Model: ${info.name} [${info.tier}] ${info.score} (${pos.current}/${pos.total}) [Ctrl+[ / Ctrl+] to cycle]`);
+    }
+
+    // Ctrl+[ to cycle to previous recommended model
+    if (key.ctrl && input === '[') {
+      const currentModel = getConsciousMindConfig().model;
+      const prevModel = getPreviousRecommendedModel(currentModel);
+      setConsciousMindModel(prevModel);
+      const info = getModelShortInfo(prevModel);
+      const pos = getModelPosition(prevModel);
+      log('info', 'system', `Model: ${info.name} [${info.tier}] ${info.score} (${pos.current}/${pos.total}) [Ctrl+[ / Ctrl+] to cycle]`);
     }
   });
 
@@ -2707,22 +3071,24 @@ const InteractiveApp: React.FC<InteractiveProps> = ({ userId, verbose: initialVe
           <Text dimColor>[Tab for more]</Text>
         </Box>
 
-        {/* Conversation only */}
-        <Box flexGrow={1} marginTop={0}>
+        {/* Conversation only - constrained to prevent overflow */}
+        <Box flexGrow={1} marginTop={0} overflow="hidden">
           <MindActivity logs={getVisibleLogs()} maxLines={getLogMaxLines()} streamingLogId={streamingLogId} selectedCodeBlock={selectedCodeBlock} expandedCodeBlocks={expandedCodeBlocks} onCodeBlockCopy={handleCodeBlockCopy} onToggleExpand={toggleCodeBlockExpand} />
         </Box>
 
-        {/* Input */}
-        <InputArea
-          value={inputValue}
-          onChange={setInputValue}
-          onSubmit={handleSubmit}
-          processing={processing}
-          queueCount={messageQueue.length}
-          onCancel={cancelProcessing}
-          onHistoryPrev={() => historyRef.current.previous()}
-          onHistoryNext={() => historyRef.current.next()}
-        />
+        {/* Input - fixed at bottom with guaranteed visibility */}
+        <Box flexShrink={0} minHeight={3}>
+          <InputArea
+            value={inputValue}
+            onChange={setInputValue}
+            onSubmit={handleSubmit}
+            processing={processing}
+            queueCount={messageQueue.length}
+            onCancel={cancelProcessing}
+            onHistoryPrev={() => historyRef.current.previous()}
+            onHistoryNext={() => historyRef.current.next()}
+          />
+        </Box>
       </Box>
     );
   }
@@ -2739,6 +3105,7 @@ const InteractiveApp: React.FC<InteractiveProps> = ({ userId, verbose: initialVe
           tokenStats={tokenStats}
           viewMode={viewMode}
           otherSessions={otherSessions}
+          terminalWidth={terminalWidth}
         />
 
         {/* Status bar showing current activity */}
@@ -2754,31 +3121,44 @@ const InteractiveApp: React.FC<InteractiveProps> = ({ userId, verbose: initialVe
           </Box>
         )}
 
-        {/* Conversation log */}
-        <Box flexGrow={1} marginTop={0}>
+        {/* Conversation log - constrained to prevent overflow */}
+        <Box flexGrow={1} marginTop={0} overflow="hidden">
           <MindActivity logs={logs} maxLines={getLogMaxLines()} streamingLogId={streamingLogId} selectedCodeBlock={selectedCodeBlock} expandedCodeBlocks={expandedCodeBlocks} onCodeBlockCopy={handleCodeBlockCopy} onToggleExpand={toggleCodeBlockExpand} />
         </Box>
 
-        {/* Input */}
-        <InputArea
-          value={inputValue}
-          onChange={setInputValue}
-          onSubmit={handleSubmit}
-          processing={processing}
-          queueCount={messageQueue.length}
-          onCancel={cancelProcessing}
-          onHistoryPrev={() => historyRef.current.previous()}
-          onHistoryNext={() => historyRef.current.next()}
-        />
+        {/* Input - fixed at bottom with guaranteed visibility */}
+        <Box flexShrink={0} minHeight={3}>
+          <InputArea
+            value={inputValue}
+            onChange={setInputValue}
+            onSubmit={handleSubmit}
+            processing={processing}
+            queueCount={messageQueue.length}
+            onCancel={cancelProcessing}
+            onHistoryPrev={() => historyRef.current.previous()}
+            onHistoryNext={() => historyRef.current.next()}
+          />
+        </Box>
       </Box>
     );
   }
 
-  // Split View - Side-by-side conversation | mind activity
+  // Split View - Side-by-side: Conscious (I) | Unconscious (We)
   if (viewMode === 'split') {
-    // Filter logs into conversation (user/response) and mind (everything else)
-    const conversationLogs = logs.filter((entry) => entry.level === 'user' || entry.level === 'response');
-    const mindLogs = logs.filter((entry) => entry.level !== 'user' && entry.level !== 'response');
+    // Filter logs by consciousness layer for meaningful split
+    // Left: I-LAYER (Conscious) - user input, responses, and I-layer thinking
+    const consciousLogs = logs.filter((entry) =>
+      entry.level === 'user' ||
+      entry.level === 'response' ||
+      entry.source === 'i-layer' ||
+      entry.source === 'zosia'
+    );
+    // Right: WE-LAYER (Unconscious) - we-layer processing, memory, system
+    const unconsciousLogs = logs.filter((entry) =>
+      entry.source === 'we-layer' ||
+      entry.source === 'memory' ||
+      entry.source === 'system'
+    );
 
     return (
       <Box flexDirection="column" height={terminalHeight - 1}>
@@ -2790,45 +3170,40 @@ const InteractiveApp: React.FC<InteractiveProps> = ({ userId, verbose: initialVe
           tokenStats={tokenStats}
           viewMode={viewMode}
           otherSessions={otherSessions}
+          terminalWidth={terminalWidth}
         />
 
-        {/* Split pane: Conversation | Mind Activity - Responsive layout */}
-        <Box flexGrow={1} marginTop={0} flexDirection={layoutSize === 'compact' ? 'column' : 'row'}>
-          {/* Left: Conversation */}
-          <Box width={layoutSize === 'compact' ? '100%' : '50%'} flexDirection="column" borderStyle="single" borderColor={C.purple} paddingX={1}>
-            <Text bold color={C.purple}>─ Conversation ─</Text>
-            <Box flexDirection="column" minHeight={getLogMaxLines()}>
-              {conversationLogs.length === 0 ? (
-                <Text dimColor italic>Conversation will appear here...</Text>
+        {/* Split pane: Conscious (I) | Unconscious (We) */}
+        <Box flexGrow={1} marginTop={0} flexDirection={layoutSize === 'compact' ? 'column' : 'row'} overflow="hidden">
+          {/* Left: Conscious (I-Layer) */}
+          <Box width={layoutSize === 'compact' ? '100%' : '50%'} flexDirection="column" borderStyle="single" borderColor={C.green} paddingX={1} overflow="hidden">
+            <Text bold color={C.green}>─ I-LAYER (Conscious) ─</Text>
+            <Box flexDirection="column" minHeight={getLogMaxLines()} overflow="hidden">
+              {consciousLogs.length === 0 ? (
+                <Text dimColor italic>Conscious thinking will appear here...</Text>
               ) : (
-                conversationLogs.slice(-getLogMaxLines()).map((entry) => {
+                consciousLogs.slice(-getLogMaxLines()).map((entry) => {
                   const timeStr = entry.timestamp.toLocaleTimeString('en-US', {
                     hour12: false,
                     hour: '2-digit',
                     minute: '2-digit',
                     second: '2-digit',
                   });
+                  // Color by type
+                  let labelColor = C.green;
+                  let labelText = 'I-LAYER';
                   if (entry.level === 'user') {
-                    return (
-                      <Box key={entry.id} flexDirection="column">
-                        <Box>
-                          <Text dimColor>{timeStr} </Text>
-                          <Text color={C.cyan}>◀ You: </Text>
-                        </Box>
-                        <Box marginLeft={2}>
-                          <Text wrap="wrap">{entry.message}</Text>
-                        </Box>
-                      </Box>
-                    );
+                    labelColor = C.cyan;
+                    labelText = '◀ YOU';
+                  } else if (entry.level === 'response' || entry.source === 'zosia') {
+                    labelColor = C.purple;
+                    labelText = '► ZOSIA';
                   }
-                  // Response - show with wrapping
                   return (
                     <Box key={entry.id} flexDirection="column">
                       <Box>
                         <Text dimColor>{timeStr} </Text>
-                        <Text color={C.purple}>► Zosia:</Text>
-                      </Box>
-                      <Box marginLeft={2}>
+                        <Text color={labelColor}>[{labelText}] </Text>
                         <Text wrap="wrap">{entry.message}</Text>
                       </Box>
                     </Box>
@@ -2838,14 +3213,14 @@ const InteractiveApp: React.FC<InteractiveProps> = ({ userId, verbose: initialVe
             </Box>
           </Box>
 
-          {/* Right: Mind Activity */}
-          <Box width={layoutSize === 'compact' ? '100%' : '50%'} flexDirection="column" borderStyle="single" borderColor={C.blue} paddingX={1}>
-            <Text bold color={C.blue}>─ Mind Activity ─</Text>
-            <Box flexDirection="column" minHeight={getLogMaxLines()}>
-              {mindLogs.length === 0 ? (
-                <Text dimColor italic>Mind activity will appear here...</Text>
+          {/* Right: Unconscious (We-Layer) */}
+          <Box width={layoutSize === 'compact' ? '100%' : '50%'} flexDirection="column" borderStyle="single" borderColor={C.blue} paddingX={1} overflow="hidden">
+            <Text bold color={C.blue}>─ WE-LAYER (Unconscious) ─</Text>
+            <Box flexDirection="column" minHeight={getLogMaxLines()} overflow="hidden">
+              {unconsciousLogs.length === 0 ? (
+                <Text dimColor italic>Unconscious processing will appear here...</Text>
               ) : (
-                mindLogs.slice(-getLogMaxLines()).map((entry) => {
+                unconsciousLogs.slice(-getLogMaxLines()).map((entry) => {
                   const timeStr = entry.timestamp.toLocaleTimeString('en-US', {
                     hour12: false,
                     hour: '2-digit',
@@ -2857,15 +3232,25 @@ const InteractiveApp: React.FC<InteractiveProps> = ({ userId, verbose: initialVe
                     'we-layer': C.blue,
                     'i-layer': C.green,
                     memory: C.orange,
+                    user: C.cyan,
+                    zosia: C.purple,
+                  };
+                  // Map source to clear, readable labels - NO truncation
+                  const sourceLabels: Record<string, string> = {
+                    system: 'SYSTEM',
+                    'we-layer': 'WE-LAYER',
+                    'i-layer': 'I-LAYER',
+                    memory: 'MEMORY',
+                    user: 'USER',
+                    zosia: 'ZOSIA',
                   };
                   const color = sourceColors[entry.source] || C.gray;
+                  const label = sourceLabels[entry.source] || entry.source.toUpperCase();
                   return (
                     <Box key={entry.id} flexDirection="column">
                       <Box>
                         <Text dimColor>{timeStr} </Text>
-                        <Text color={color}>[{entry.source.toUpperCase().slice(0, 6)}] </Text>
-                      </Box>
-                      <Box marginLeft={2}>
+                        <Text color={color}>[{label}] </Text>
                         <Text wrap="wrap">{entry.message}</Text>
                       </Box>
                     </Box>
@@ -2876,17 +3261,19 @@ const InteractiveApp: React.FC<InteractiveProps> = ({ userId, verbose: initialVe
           </Box>
         </Box>
 
-        {/* Input */}
-        <InputArea
-          value={inputValue}
-          onChange={setInputValue}
-          onSubmit={handleSubmit}
-          processing={processing}
-          queueCount={messageQueue.length}
-          onCancel={cancelProcessing}
-          onHistoryPrev={() => historyRef.current.previous()}
-          onHistoryNext={() => historyRef.current.next()}
-        />
+        {/* Input - fixed at bottom with guaranteed visibility */}
+        <Box flexShrink={0} minHeight={3}>
+          <InputArea
+            value={inputValue}
+            onChange={setInputValue}
+            onSubmit={handleSubmit}
+            processing={processing}
+            queueCount={messageQueue.length}
+            onCancel={cancelProcessing}
+            onHistoryPrev={() => historyRef.current.previous()}
+            onHistoryNext={() => historyRef.current.next()}
+          />
+        </Box>
       </Box>
     );
   }
@@ -2904,7 +3291,7 @@ const InteractiveApp: React.FC<InteractiveProps> = ({ userId, verbose: initialVe
         otherSessions={otherSessions}
       />
 
-      {/* Being State Panels Row - Responsive layout */}
+      {/* Being State Panels Row 1 - Responsive layout */}
       <Box marginTop={0}>
         <Box width={layoutConfig.panelWidth}>
           <InternalStatePanel being={beingState} status={systemStatus} />
@@ -2919,22 +3306,24 @@ const InteractiveApp: React.FC<InteractiveProps> = ({ userId, verbose: initialVe
         )}
       </Box>
 
-      {/* Mind Activity Log */}
-      <Box flexGrow={1} marginTop={0}>
+      {/* Mind Activity Log - constrained to prevent overflow */}
+      <Box flexGrow={1} marginTop={0} overflow="hidden">
         <MindActivity logs={logs} maxLines={getLogMaxLines()} streamingLogId={streamingLogId} selectedCodeBlock={selectedCodeBlock} expandedCodeBlocks={expandedCodeBlocks} onCodeBlockCopy={handleCodeBlockCopy} onToggleExpand={toggleCodeBlockExpand} />
       </Box>
 
-      {/* Input */}
-      <InputArea
-        value={inputValue}
-        onChange={setInputValue}
-        onSubmit={handleSubmit}
-        processing={processing}
-        queueCount={messageQueue.length}
-        onCancel={cancelProcessing}
-        onHistoryPrev={() => historyRef.current.previous()}
-        onHistoryNext={() => historyRef.current.next()}
-      />
+      {/* Input - fixed at bottom with guaranteed visibility */}
+      <Box flexShrink={0} minHeight={3}>
+        <InputArea
+          value={inputValue}
+          onChange={setInputValue}
+          onSubmit={handleSubmit}
+          processing={processing}
+          queueCount={messageQueue.length}
+          onCancel={cancelProcessing}
+          onHistoryPrev={() => historyRef.current.previous()}
+          onHistoryNext={() => historyRef.current.next()}
+        />
+      </Box>
     </Box>
   );
 };

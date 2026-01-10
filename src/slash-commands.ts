@@ -147,6 +147,15 @@ export const COMMANDS = new Map<string, SlashCommand>([
       aliases: ['setup', 'keys', 'config-status'],
     },
   ],
+  [
+    'model',
+    {
+      name: 'model',
+      description: 'View or change the conscious mind model',
+      usage: '/model [list|set <model_id>|info|next|prev]',
+      aliases: ['m'],
+    },
+  ],
 ]);
 
 /** Map aliases to their canonical command names */
